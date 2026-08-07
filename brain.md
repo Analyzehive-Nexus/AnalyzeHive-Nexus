@@ -103,6 +103,13 @@ Made all three services deployable to Vercel. Deployed as **three separate Verce
 
 **Verification done** (not just builds): both `npm run build`s pass; the Express handler was exercised the way Vercel actually invokes it (imported `dist/api/index.js`'s default export, invoked as `(req, res)`) with routes returning correctly; the FastAPI handler was imported under a Vercel-style `sys.path` and driven with `TestClient` (`/health`, `/predict`, `/docs` all 200); the backend→inference proxy was confirmed end-to-end; and `CORS_ORIGIN` was checked both ways (allowed origin gets the header, a disallowed one gets none).
 
+## Vercel Framework-Detection Fix (2026-08-08)
+First real deploy of `backend/` failed with `No entrypoint found in output directory: "public"` (searched `app|index|server.{js,ts,…}` and `src/` variants). Cause: Vercel CLI 58 auto-detects **framework presets for the API services too** — confirmed by running Vercel's own detector (`@vercel/fs-detectors`) against each root: `backend => express`, `inference => fastapi`, `frontend => nextjs`. Both API presets declare `outputDirectory: "N/A"` because they want a *server entrypoint*, not a static dir; our `vercel.json`s set `outputDirectory: "public"`, so the preset searched `public/` for a server file and found only `index.html`.
+
+**Fix:** added `"framework": null` to both `backend/vercel.json` and `inference/vercel.json` (vercel.json overrides dashboard/auto-detected settings). This restores the zero-config model these configs were written for: `public/` = static assets, `api/` = serverless functions. The `inference/` change was preemptive — it had the identical config and would have failed identically on its next deploy.
+
+**Why this matters beyond the error message:** without `framework: null`, even with `outputDirectory` removed the Express preset would find `src/index.ts` at the root and deploy *that* as the function — silently bypassing `api/index.ts`, making the `functions` block's `maxDuration` dead config, and shipping the `app.listen()` entrypoint that the two-entrypoint design (above) specifically keeps out of production. **Do not remove `"framework": null` from either API service**, and add it to any new non-frontend service here. `frontend/` is unaffected — it already pins `"framework": "nextjs"` explicitly, which is correct for it.
+
 ## Agent Instructions
 - **Read First**: Always read this `brain.md` file when initializing a new session to restore context.
 - **Update Frequently**: Whenever making architectural decisions, implementing a significant workaround (like the auth mock), or adding new tech stack dependencies, update this file so future sessions are aware of the changes.
