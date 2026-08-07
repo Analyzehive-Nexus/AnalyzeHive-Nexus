@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Analyzehive Inference</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #0b0f14;
+        color: #d7e0ea;
+      }
+      main { padding: 2rem; max-width: 34rem; }
+      h1 { font-size: 1.1rem; letter-spacing: .04em; text-transform: uppercase; color: #a78bfa; }
+      code { color: #93c5fd; }
+      ul { padding-left: 1.1rem; }
+      li { margin: .2rem 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Analyzehive Inference</h1>
+      <p>FastAPI inference service. Called server-to-server by the backend.</p>
+      <ul>
+        <li><code>GET /health</code></li>
+        <li><code>POST /predict</code></li>
+        <li><code>GET /docs</code></li>
+      </ul>
+    </main>
+  </body>
+</html>

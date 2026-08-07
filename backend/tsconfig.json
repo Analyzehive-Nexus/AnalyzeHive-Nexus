@@ -4,11 +4,15 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src"]
+  // api/ holds the Vercel serverless entrypoint. It is compiled by Vercel's
+  // own Node builder, not by this tsc run, but it must be type-checked here
+  // or a break in it passes `npm run build` and only fails at deploy time.
+  // Including it means tsc's inferred root is the package dir, hence the
+  // dist/src/... layout that `npm start` points at.
+  "include": ["src", "api"]
 }

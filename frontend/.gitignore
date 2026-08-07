@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the template must be tracked - it's the reference for which
+# Environment Variables to set in the Vercel project.
+!.env.example
 
 # vercel
 .vercel

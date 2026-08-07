@@ -1,0 +1,11 @@
+# OS
+.DS_Store
+
+# Vercel CLI link/state, created by `vercel link` / `vercel dev` in any
+# service directory.
+.vercel
+
+# Never commit real secrets - only the .env.example templates are tracked.
+.env
+.env.local
+.env.*.local
