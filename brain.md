@@ -258,3 +258,23 @@ New: `lib/currency.tsx`, `lib/filters.tsx`, `components/WorkspaceControls.tsx` (
 
 ### Not done
 `/api/supply-chain/sto` writes a `pending` row and stops — there is no SAP integration to acknowledge it. That is deliberate: a fabricated document number would be worse than an honest pending state. `call_recordings.audio_url` is NULL, so the waveform renders as an interactive timeline with markers and says plainly that no audio is attached.
+
+## Synthetic Dataset (2026-09-08)
+The live database now holds **~744k generated rows across 60 tables**, on top of the migration seeds. `backend/scripts/generate-synthetic-data.py` produces it deterministically (fixed PRNG seed, `INSERT OR IGNORE`, surrogate keys from 100000), and `backend/scripts/load-sql.py` applies it. Regenerating gives byte-identical output, so the dataset is reproducible rather than a one-off.
+
+**Three tables are deliberately never populated**, and this is a rule not an oversight: `users` (the auth allowlist — inventing accounts invents access), `sessions` (a row there *is* a live credential) and `oauth_states` (single-use and expiring by design).
+
+**Three stay small on purpose:** `regions` (12), `currencies` and `fx_rates` (24 each). They are option lists, and `Intl.NumberFormat` **throws** on a currency code that is not real ISO 4217 — padding them to 1000 with invented codes would break the currency switcher outright. Everything else clears 1000.
+
+**Two D1 limits, both measured rather than guessed** (see `scripts/README.md`):
+1. A `/query` payload above **~1.25MB** returns `SQLITE_TOOBIG: statement too long`. The first attempt failed at exactly the file that overshot 1.25MB, because the writer flushed *after* crossing its threshold.
+2. Per-statement, the ceiling is far below SQLite's nominal 1MB: a **52KB** INSERT succeeds and a **105KB** one fails. The generator caps statements at 45KB. Chasing this cost three failed loads — the error message points at statement length either way, so only bisecting told them apart.
+
+**`INSERT OR IGNORE` only dedupes rows that carry an explicit key.** `stockist_sales` and `logger_readings` insert without an id and lean on `AUTOINCREMENT`, so three interrupted-and-retried loads left `stockist_sales` at 182k rows where 50k were distinct. Repaired by deleting the generated rows and re-inserting once. **Clear those two before any re-run.**
+
+**Realistic volume broke the API, and that was the point of loading it.** Endpoints that were fine against a few hundred seed rows fell over: `/api/commercial-truth/visits` ran a correlated subquery per row over 50k sales and 503'd after 15s; `/api/cold-chain/shipments` did six correlated subqueries per row, one over 159k readings; `/api/supply-chain/watchlist` returned a 3.8MB payload. Fixes:
+- `backend/src/db/paging.ts` — `pageLimit(req, fallback, max)`. **Every list route needs one.**
+- For the two O(n²) queries the limit had to move *inside* a subquery so the page is narrowed **before** the correlated lookups run; a trailing `LIMIT` still costs the full scan.
+- All 22 endpoints now return 200 in under 1.5s with KB-sized payloads.
+
+**Frontend consequence:** 20k batches over 1500 SKUs meant the simulator's SKU picker had duplicate React keys. The watchlist is per *batch*, the simulator operates on a *SKU* — the picker now collapses to the first batch per SKU.

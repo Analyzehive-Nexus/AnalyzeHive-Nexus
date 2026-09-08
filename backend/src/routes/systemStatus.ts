@@ -34,9 +34,13 @@ systemStatusRouter.get("/services", async (_req, res) => {
   try {
     const [services] = await batchQuery<[ServiceRow[]]>([
       {
+        // Narrowed before the per-service latency lookup: that subquery is
+        // one scan of service_checks per row.
         sql: `SELECT s.id, s.name, s.region, s.status, s.uptime_pct,
                      c.latency_ms, c.checked_at
-                FROM services s
+                FROM (SELECT * FROM services
+                       ORDER BY (status = 'Operational'), id
+                       LIMIT 100) s
                 LEFT JOIN service_checks c
                        ON c.id = (SELECT id FROM service_checks
                                    WHERE service_id = s.id
@@ -71,7 +75,8 @@ systemStatusRouter.get("/incidents", async (_req, res) => {
       {
         sql: `SELECT id, title, severity, status, started_at, resolved_at
                 FROM incidents
-               ORDER BY started_at DESC, id DESC`,
+               ORDER BY started_at DESC, id DESC
+               LIMIT 50`,
         params: [],
       },
     ]);

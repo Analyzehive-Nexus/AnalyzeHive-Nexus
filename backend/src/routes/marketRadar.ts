@@ -2,6 +2,7 @@ import { Router } from "express";
 import { query } from "../db/d1.js";
 import { likePattern, toBool, toIso } from "../db/rows.js";
 import { regionScope } from "../db/scope.js";
+import { pageLimit } from "../db/paging.js";
 
 export const marketRadarRouter = Router();
 
@@ -28,7 +29,8 @@ marketRadarRouter.get("/signals", async (req, res) => {
       `SELECT id, source, title, sentiment, impact, detected_at
          FROM market_signals
         WHERE 1 = 1 ${scope.clause} ${search}
-        ORDER BY detected_at DESC, id DESC`,
+        ORDER BY detected_at DESC, id DESC
+        LIMIT 100`,
       [...scope.params, ...searchParams]
     );
     res.json({
@@ -122,7 +124,8 @@ interface PatentRow {
  * rule the expiry watchlist follows. A negative value means exclusivity has
  * already lapsed and generics can enter.
  */
-marketRadarRouter.get("/patents", async (_req, res) => {
+marketRadarRouter.get("/patents", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<PatentRow>(
       `SELECT id, molecule, brand, holder, market, exclusivity_type,
@@ -130,7 +133,8 @@ marketRadarRouter.get("/patents", async (_req, res) => {
               CAST(julianday(expiry_date) - julianday('now') AS INTEGER)
                 AS days_to_expiry
          FROM patents
-        ORDER BY days_to_expiry`
+        ORDER BY days_to_expiry
+        LIMIT ${limit}`
     );
     res.json({
       patents: rows.map((r) => ({
@@ -160,13 +164,15 @@ interface RegRow {
 }
 
 /** DPCO/NPPA ceiling prices and FDA/EMA/CDSCO events as one feed. */
-marketRadarRouter.get("/regulatory", async (_req, res) => {
+marketRadarRouter.get("/regulatory", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<RegRow>(
       `SELECT id, authority, kind, product, ceiling_price_minor,
               previous_price_minor, detail, effective_from, published_at
          FROM regulatory_events
-        ORDER BY published_at DESC`
+        ORDER BY published_at DESC
+        LIMIT ${limit}`
     );
     res.json({
       events: rows.map((r) => {
@@ -196,7 +202,8 @@ marketRadarRouter.get("/regulatory", async (_req, res) => {
 });
 
 /** Formulary tier movement. Tier 1 is the most favourable placement. */
-marketRadarRouter.get("/formulary", async (_req, res) => {
+marketRadarRouter.get("/formulary", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<{
       id: number; network: string; product: string; tier: number;
@@ -206,7 +213,8 @@ marketRadarRouter.get("/formulary", async (_req, res) => {
               f.changed_at, r.name AS region_name
          FROM formulary_placements f
          LEFT JOIN regions r ON r.id = f.region_id
-        ORDER BY f.changed_at DESC`
+        ORDER BY f.changed_at DESC
+        LIMIT ${limit}`
     );
     res.json({
       placements: rows.map((r) => ({
@@ -230,7 +238,8 @@ marketRadarRouter.get("/formulary", async (_req, res) => {
 });
 
 /** Share of voice by therapeutic area for the current period. */
-marketRadarRouter.get("/share-of-voice", async (_req, res) => {
+marketRadarRouter.get("/share-of-voice", async (req, res) => {
+  const limit = pageLimit(req, 300, 1000);
   try {
     const rows = await query<{
       therapeutic_area: string; company: string; sov_pct: number; is_own: number;
@@ -238,7 +247,8 @@ marketRadarRouter.get("/share-of-voice", async (_req, res) => {
       `SELECT therapeutic_area, company, sov_pct, is_own
          FROM share_of_voice
         WHERE period = strftime('%Y-%m', 'now')
-        ORDER BY therapeutic_area, sov_pct DESC`
+        ORDER BY therapeutic_area, sov_pct DESC
+        LIMIT ${limit}`
     );
 
     // Group in the API rather than making the UI pivot a flat list.
@@ -263,7 +273,8 @@ marketRadarRouter.get("/share-of-voice", async (_req, res) => {
 });
 
 /** Pipeline velocity - who is moving through Phase II/III, and how fast. */
-marketRadarRouter.get("/trials", async (_req, res) => {
+marketRadarRouter.get("/trials", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<{
       id: string; sponsor: string; molecule: string; therapeutic_area: string | null;
@@ -274,7 +285,8 @@ marketRadarRouter.get("/trials", async (_req, res) => {
               started_at, est_completion, schedule_delta_days, is_own
          FROM clinical_trials
         ORDER BY CASE phase WHEN 'III' THEN 0 WHEN 'II' THEN 1 WHEN 'I' THEN 2 ELSE 3 END,
-                 schedule_delta_days`
+                 schedule_delta_days
+        LIMIT ${limit}`
     );
     res.json({
       trials: rows.map((r) => ({

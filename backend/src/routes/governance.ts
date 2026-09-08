@@ -47,14 +47,16 @@ governanceRouter.get("/me", async (req, res) => {
                 FROM role_permissions rp
                 JOIN permissions p ON p.id = rp.permission_id
                WHERE rp.role = ?
-               ORDER BY rp.permission_id`,
+               ORDER BY rp.permission_id
+               LIMIT 200`,
         params: [role],
       },
       {
         sql: `SELECT id, issued_at, expires_at, status
                 FROM signature_credentials
                WHERE user_id = ?
-               ORDER BY issued_at DESC`,
+               ORDER BY issued_at DESC
+               LIMIT 20`,
         params: [userId],
       },
       {
@@ -66,7 +68,7 @@ governanceRouter.get("/me", async (req, res) => {
                LIMIT 20`,
         params: [userId],
       },
-      { sql: `SELECT scope_type, scope_id FROM user_scopes WHERE user_id = ?`, params: [userId] },
+      { sql: `SELECT scope_type, scope_id FROM user_scopes WHERE user_id = ? LIMIT 200`, params: [userId] },
     ]);
 
     res.json({

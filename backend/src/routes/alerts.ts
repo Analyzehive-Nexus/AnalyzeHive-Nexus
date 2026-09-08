@@ -38,7 +38,8 @@ alertsRouter.get("/", async (req, res) => {
       `SELECT ${COLUMNS}
          FROM alerts
         WHERE resolved_at IS NULL ${scope.clause}
-        ORDER BY created_at DESC, id DESC`,
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100`,
       scope.params
     );
     res.json({ alerts: rows.map(shape) });

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { batchQuery, query } from "../db/d1.js";
 import { toIso } from "../db/rows.js";
 import { regionScope } from "../db/scope.js";
+import { pageLimit } from "../db/paging.js";
 
 export const coldChainRouter = Router();
 
@@ -28,7 +29,10 @@ interface ShipmentRow {
 }
 
 coldChainRouter.get("/shipments", async (req, res) => {
-  const scope = regionScope(req.user, "s.region_id");
+  const scope = regionScope(req.user, "region_id");
+  // Narrow first: each shipment row fans out into six correlated subqueries,
+  // one of them over the whole logger_readings series.
+  const limit = pageLimit(req, 60, 200);
   try {
     const rows = await query<ShipmentRow>(
       `SELECT s.id, s.carrier, s.mode, s.status, s.temp_min_c, s.temp_max_c,
@@ -57,13 +61,15 @@ coldChainRouter.get("/shipments", async (req, res) => {
                 WHERE l2.shipment_id = s.id
                   AND (lr.temp_c < s.temp_min_c OR lr.temp_c > s.temp_max_c))
                 AS excursion_readings
-         FROM shipments s
+         FROM (SELECT * FROM shipments
+                WHERE 1 = 1 ${scope.clause}
+                ORDER BY (status = 'delivered'), eta
+                LIMIT ?) s
          LEFT JOIN warehouses o ON o.id = s.origin_id
          LEFT JOIN warehouses d ON d.id = s.destination_id
          LEFT JOIN regions    r ON r.id = s.region_id
-        WHERE 1 = 1 ${scope.clause}
         ORDER BY (s.status = 'delivered'), s.eta`,
-      scope.params
+      [...scope.params, limit]
     );
 
     res.json({
@@ -122,7 +128,8 @@ coldChainRouter.get("/summary", async (_req, res) => {
                WHERE resolved_at IS NULL
                ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                                       WHEN 'medium' THEN 2 ELSE 3 END,
-                        detected_at DESC`,
+                        detected_at DESC
+               LIMIT 50`,
         params: [],
       },
       {

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { batchQuery, first, query, run } from "../db/d1.js";
 import { toBool, toIso } from "../db/rows.js";
 import { regionScope } from "../db/scope.js";
+import { pageLimit } from "../db/paging.js";
 
 export const supplyChainRouter = Router();
 
@@ -26,6 +27,7 @@ interface BatchRow {
  */
 supplyChainRouter.get("/watchlist", async (req, res) => {
   const scope = regionScope(req.user, "b.region_id");
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<BatchRow>(
       `SELECT b.batch_code, b.sku, s.name, b.quantity, b.value_minor,
@@ -36,8 +38,9 @@ supplyChainRouter.get("/watchlist", async (req, res) => {
          JOIN skus s ON s.sku = b.sku
          LEFT JOIN regions r ON r.id = b.region_id
         WHERE 1 = 1 ${scope.clause}
-        ORDER BY days_to_expiry`,
-      scope.params
+        ORDER BY days_to_expiry
+        LIMIT ?`,
+      [...scope.params, limit]
     );
 
     res.json({

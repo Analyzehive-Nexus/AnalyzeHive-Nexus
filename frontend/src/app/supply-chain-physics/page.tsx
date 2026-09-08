@@ -143,6 +143,15 @@ function SupplyChainContent() {
     [watchlist, sku]
   );
 
+  // The simulator operates on a SKU, but the watchlist is per BATCH and many
+  // batches share a SKU. Collapse to the first batch per SKU so the picker has
+  // one entry - and one React key - per option.
+  const skuOptions = useMemo(() => {
+    const seen = new Map<string, WatchItem>();
+    for (const w of watchlist) if (!seen.has(w.sku)) seen.set(w.sku, w);
+    return [...seen.values()];
+  }, [watchlist]);
+
   const raiseSto = useCallback(async () => {
     if (!sku) return;
     setStoBusy(true);
@@ -225,7 +234,7 @@ function SupplyChainContent() {
                 onChange={(e) => { setSku(e.target.value); setLaneId(null); }}
                 className="rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-xs text-fg focus:border-accent focus:outline-none"
               >
-                {watchlist.map((w) => (
+                {skuOptions.map((w) => (
                   <option key={w.sku} value={w.sku}>
                     {w.name} ({w.batchCode ?? w.sku})
                   </option>
@@ -373,7 +382,7 @@ function SupplyChainContent() {
           <p className="mb-4 text-xs text-subtle">Ordered by days remaining</p>
           <ul className="space-y-2">
             {watchlist.slice(0, 10).map((w) => (
-              <li key={w.batchCode ?? w.sku}>
+              <li key={w.batchCode ?? `${w.sku}-${w.daysToExpiry}`}>
                 <button
                   onClick={() => { setSku(w.sku); setLaneId(null); }}
                   className={`w-full rounded-lg border p-3 text-left transition ${

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { batchQuery, first, query } from "../db/d1.js";
 import { toIso } from "../db/rows.js";
+import { pageLimit } from "../db/paging.js";
 
 export const discoveryRouter = Router();
 
@@ -19,7 +20,8 @@ interface ProgramRow {
   lead_name: string | null; model_count: number; candidate_count: number;
 }
 
-discoveryRouter.get("/programs", async (_req, res) => {
+discoveryRouter.get("/programs", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<ProgramRow>(
       `SELECT p.id, p.name, p.therapeutic_area, p.target, p.phase,
@@ -33,7 +35,8 @@ discoveryRouter.get("/programs", async (_req, res) => {
         ORDER BY CASE p.phase
                    WHEN 'submitted' THEN 0 WHEN 'III' THEN 1 WHEN 'II' THEN 2
                    WHEN 'I' THEN 3 WHEN 'preclinical' THEN 4 ELSE 5 END,
-                 p.name`
+                 p.name
+        LIMIT ${limit}`
     );
 
     res.json({
@@ -63,14 +66,16 @@ interface ModelRow {
   updated_at: string; program_name: string | null;
 }
 
-discoveryRouter.get("/models", async (_req, res) => {
+discoveryRouter.get("/models", async (req, res) => {
+  const limit = pageLimit(req, 200, 500);
   try {
     const rows = await query<ModelRow>(
       `SELECT m.id, m.program_id, m.name, m.disease, m.model_type, m.summary,
               m.nodes, m.edges, m.updated_at, p.name AS program_name
          FROM disease_models m
          LEFT JOIN discovery_programs p ON p.id = m.program_id
-        ORDER BY m.name`
+        ORDER BY m.name
+        LIMIT ${limit}`
     );
     res.json({
       models: rows.map((r) => ({
@@ -139,6 +144,7 @@ interface CandidateRow {
 
 discoveryRouter.get("/candidates", async (req, res) => {
   const programId = typeof req.query.program === "string" ? req.query.program : null;
+  const limit = pageLimit(req, 100, 500);
   try {
     const [rows] = await batchQuery<[CandidateRow[]]>([
       {
@@ -150,7 +156,8 @@ discoveryRouter.get("/candidates", async (req, res) => {
                ORDER BY CASE c.status
                           WHEN 'optimised' THEN 0 WHEN 'lead' THEN 1
                           WHEN 'hit' THEN 2 WHEN 'screening' THEN 3 ELSE 4 END,
-                        c.binding_affinity_nm`,
+                        c.binding_affinity_nm
+               LIMIT ${limit}`,
         params: [programId, programId],
       },
     ]);

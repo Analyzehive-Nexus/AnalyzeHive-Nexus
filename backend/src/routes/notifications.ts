@@ -38,7 +38,8 @@ notificationsRouter.get("/", async (req, res) => {
          LEFT JOIN notification_reads r
                 ON r.notification_id = n.id AND r.user_id = ?
         WHERE 1 = 1 ${scope.clause}
-        ORDER BY n.created_at DESC, n.id DESC`,
+        ORDER BY n.created_at DESC, n.id DESC
+        LIMIT 100`,
       [req.user!.id, ...scope.params]
     );
     const notifications = rows.map(shape);

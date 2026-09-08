@@ -2,6 +2,7 @@ import { Router } from "express";
 import { batchQuery, query } from "../db/d1.js";
 import { toBool, toIso } from "../db/rows.js";
 import { regionScope } from "../db/scope.js";
+import { pageLimit } from "../db/paging.js";
 
 export const commercialTruthRouter = Router();
 
@@ -140,6 +141,9 @@ interface VisitRow {
 commercialTruthRouter.get("/visits", async (req, res) => {
   const scope = regionScope(req.user, "v.region_id");
   const onlyFlagged = req.query.flagged === "1";
+  // The page is narrowed BEFORE the triangulation subqueries run - applying
+  // the limit afterwards would still cost a full scan per visit.
+  const limit = pageLimit(req, 50, 200);
   try {
     const rows = await query<VisitRow>(
       `SELECT v.id, v.visited_at, v.distance_m, v.geo_verified, v.spoof_score,
@@ -155,13 +159,15 @@ commercialTruthRouter.get("/visits", async (req, res) => {
                 WHERE ss.hcp_id = v.hcp_id
                   AND ss.sold_on <= date(v.visited_at)
                   AND ss.sold_on >  date(v.visited_at, '-7 days')) AS units_before
-         FROM hcp_visits v
+         FROM (SELECT * FROM hcp_visits
+                WHERE 1 = 1 ${scope.clause}
+                  AND (? = 0 OR geo_verified = 0)
+                ORDER BY visited_at DESC
+                LIMIT ?) v
          JOIN field_reps fr ON fr.id = v.rep_id
          JOIN hcps h        ON h.id  = v.hcp_id
-        WHERE 1 = 1 ${scope.clause}
-          AND (? = 0 OR v.geo_verified = 0)
         ORDER BY v.visited_at DESC`,
-      [...scope.params, onlyFlagged ? 1 : 0]
+      [...scope.params, onlyFlagged ? 1 : 0, limit]
     );
 
     res.json({
@@ -291,7 +297,8 @@ interface EffRow {
 }
 
 /** DPRI, geo-spoofing rate and the detraction/conversion ratio, per rep. */
-commercialTruthRouter.get("/effectiveness", async (_req, res) => {
+commercialTruthRouter.get("/effectiveness", async (req, res) => {
+  const limit = pageLimit(req, 100, 500);
   try {
     const rows = await query<EffRow>(
       `SELECT e.rep_id, fr.name AS rep_name, e.dpri, e.geo_spoof_rate_pct,
@@ -299,7 +306,8 @@ commercialTruthRouter.get("/effectiveness", async (_req, res) => {
          FROM rep_effectiveness e
          JOIN field_reps fr ON fr.id = e.rep_id
         WHERE e.period = strftime('%Y-%m', 'now')
-        ORDER BY e.dpri DESC`
+        ORDER BY e.dpri DESC
+        LIMIT ${limit}`
     );
     res.json({
       reps: rows.map((r) => ({
