@@ -1,22 +1,57 @@
 import { Router } from "express";
+import { batchQuery } from "../db/d1.js";
+import { toIso } from "../db/rows.js";
 
 export const profileRouter = Router();
 
-const activityLog = [
-  { id: 1, action: "Authorized transfer at Warehouse North", time: "2 mins ago", type: "success" },
-  { id: 2, action: "Updated security protocols for APAC region", time: "2 hours ago", type: "info" },
-  { id: 3, action: "Login detected from new device (iPad Pro)", time: "Yesterday", type: "warning" },
-  { id: 4, action: "Generated Q3 Forecast Report", time: "2 days ago", type: "success" },
-  { id: 5, action: "Approved redistribution of 3,000 units", time: "3 days ago", type: "success" },
-  { id: 6, action: "Reviewed flagged audit for R. Patel", time: "4 days ago", type: "warning" },
-  { id: 7, action: "Exported Commercial Truth report", time: "5 days ago", type: "info" },
-  { id: 8, action: "Updated notification preferences", time: "1 week ago", type: "info" },
-];
+interface ActivityRow {
+  id: number;
+  action: string;
+  kind: string;
+  occurred_at: string;
+}
 
-profileRouter.get("/activity", (req, res) => {
-  const limit = Math.max(1, Number(req.query.limit ?? 4));
-  res.json({
-    activity: activityLog.slice(0, limit),
-    total: activityLog.length,
-  });
+/**
+ * One person's own trail, never the whole table: activity_log has a user_id
+ * and this is the only place it is read, so the filter lives here.
+ *
+ * Rows are written by the sign-in path today; the list is legitimately short
+ * on a fresh database rather than pre-populated with someone else's history.
+ */
+profileRouter.get("/activity", async (req, res) => {
+  // Number("abc") is NaN, and Math.max(1, NaN) stays NaN - a NaN LIMIT reaches
+  // D1 as null and returns nothing, so a junk limit used to 200 with an empty
+  // list. Capped as well: LIMIT comes from the query string.
+  const parsed = Number(req.query.limit ?? 4);
+  const limit = Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.floor(parsed))) : 4;
+
+  try {
+    const [rows, totals] = await batchQuery<[ActivityRow[], { total: number }[]]>([
+      {
+        sql: `SELECT id, action, kind, occurred_at
+                FROM activity_log
+               WHERE user_id = ?
+               ORDER BY occurred_at DESC, id DESC
+               LIMIT ?`,
+        params: [req.user!.id, limit],
+      },
+      {
+        sql: `SELECT COUNT(*) AS total FROM activity_log WHERE user_id = ?`,
+        params: [req.user!.id],
+      },
+    ]);
+
+    res.json({
+      activity: rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        type: row.kind,
+        occurredAt: toIso(row.occurred_at),
+      })),
+      total: totals[0]?.total ?? 0,
+    });
+  } catch (cause) {
+    console.error("[profile] activity failed:", cause);
+    res.status(503).json({ detail: "Could not load activity" });
+  }
 });
