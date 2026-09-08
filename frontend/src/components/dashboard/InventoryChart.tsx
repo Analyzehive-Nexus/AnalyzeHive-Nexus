@@ -11,14 +11,30 @@ import {
   ReferenceLine,
 } from "recharts";
 import { memo } from "react";
+import { palette } from "@/lib/theme";
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+// Recharts calls this with a loosely-typed payload; narrow it to what we read.
+interface TooltipEntry {
+  value?: number | string;
+}
+
+const CustomTooltip = ({
+  active,
+  payload,
+  label,
+  valueLabel = "Entropy",
+}: {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string | number;
+  valueLabel?: string;
+}) => {
   if (active && payload && payload.length) {
     return (
-      <div className="backdrop-blur-xl bg-[#0b0f14]/90 border border-[#334155]/50 p-3 rounded-lg shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-        <p className="text-xs text-[#94a3b8] mb-1 font-medium">Day {label}</p>
-        <p className="text-lg font-bold text-white flex items-center gap-2">
-          {payload[0].value} <span className="text-[10px] font-normal text-[#7cff4e] bg-[#7cff4e]/10 px-1.5 py-0.5 rounded">Entropy</span>
+      <div className="bg-surface border border-line p-3 rounded-lg shadow-overlay">
+        <p className="text-xs text-muted mb-1 font-medium">Day {label}</p>
+        <p className="text-lg font-bold text-fg flex items-center gap-2">
+          {payload[0].value} <span className="text-[10px] font-normal text-accent bg-accent-tint px-1.5 py-0.5 rounded">{valueLabel}</span>
         </p>
       </div>
     );
@@ -30,35 +46,41 @@ interface InventoryChartProps {
   data: { day: string; value: number }[];
   selectedDay: string | null;
   onSelectDay?: (day: string | null) => void;
+  title?: string;
+  subtitle?: string;
+  badge?: string;
+  /** Label for the tooltip's value, e.g. "Rs lakh at risk". */
+  valueLabel?: string;
 }
 
 function InventoryChart({
   data,
   selectedDay,
-  onSelectDay
+  onSelectDay,
+  title = "Inventory entropy",
+  subtitle = "Real-time fluctuation analysis",
+  badge = "LIVE 30D",
+  valueLabel = "Entropy",
 }: InventoryChartProps) {
   return (
-    <div className="h-full rounded-2xl bg-[#0f141b]/60 backdrop-blur-sm border border-[#1e293b] p-5 relative overflow-hidden group hover:border-[#7cff4e]/30 transition-colors duration-500">
+    <div className="h-full rounded-2xl bg-surface backdrop-blur-sm border border-line p-5 relative overflow-hidden group hover:border-accent-line transition-colors duration-500">
       
-      {/* Background Glow */}
-      <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-[#7cff4e]/5 blur-[100px] rounded-full pointer-events-none" />
-
       {/* Chart Title */}
       <div className="relative z-10 flex justify-between items-start mb-6">
         <div>
-          <h3 className="font-semibold text-white flex items-center gap-2">
-            Inventory Entropy
+          <h3 className="font-semibold text-fg flex items-center gap-2">
+            {title}
             {selectedDay && (
-              <span className="text-[10px] bg-[#7cff4e]/20 text-[#7cff4e] px-2 py-0.5 rounded-full animate-fade-in-up">
+              <span className="text-[10px] bg-accent-tint text-accent px-2 py-0.5 rounded-full animate-fade-in-up">
                  Filter: Day {selectedDay}
               </span>
             )}
           </h3>
-          <p className="text-xs text-[#64748b] mt-1">Real-time fluctuation analysis</p>
+          <p className="text-xs text-subtle mt-1">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2 px-2 py-1 bg-[#7cff4e]/5 border border-[#7cff4e]/20 rounded-lg">
-           <span className="w-1.5 h-1.5 rounded-full bg-[#7cff4e] animate-pulse" />
-           <span className="text-[10px] text-[#7cff4e] font-medium tracking-wide">LIVE 30D</span>
+        <div className="flex items-center gap-2 px-2 py-1 bg-accent-tint border border-accent-line rounded-lg">
+           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+           <span className="text-[10px] text-accent font-medium tracking-wide">{badge}</span>
         </div>
       </div>
 
@@ -78,51 +100,51 @@ function InventoryChart({
           >
             <defs>
               <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#7cff4e" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#7cff4e" stopOpacity={0} />
+                <stop offset="5%" stopColor={palette.accent} stopOpacity={0.18} />
+                <stop offset="95%" stopColor={palette.accent} stopOpacity={0} />
               </linearGradient>
             </defs>
 
             <CartesianGrid 
-              stroke="rgba(255,255,255,0.03)" 
+              stroke={palette.line} 
               vertical={false} 
               strokeDasharray="4 4" 
             />
             
             <XAxis 
               dataKey="day" 
-              stroke="#475569" 
-              tick={{ fill: "#64748b", fontSize: 10 }} 
+              stroke={palette.line}
+              tick={{ fill: palette.subtle, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               dy={10}
             />
             <YAxis 
-              stroke="#475569" 
-              tick={{ fill: "#64748b", fontSize: 10 }} 
+              stroke={palette.line}
+              tick={{ fill: palette.subtle, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
             />
             
             <Tooltip 
-              content={<CustomTooltip />} 
-              cursor={{ stroke: '#7cff4e', strokeWidth: 1, strokeDasharray: '4 4' }}
+              content={<CustomTooltip valueLabel={valueLabel} />} 
+              cursor={{ stroke: palette.faint, strokeWidth: 1, strokeDasharray: '4 4' }}
             />
             
             {/* Highlight Selected Day */}
             {selectedDay && (
-               <ReferenceLine x={selectedDay} stroke="#7cff4e" strokeWidth={1} strokeDasharray="3 3" />
+               <ReferenceLine x={selectedDay} stroke={palette.accent} strokeWidth={1} strokeDasharray="3 3" />
             )}
 
             <Area
               type="monotone"
               dataKey="value"
-              stroke="#7cff4e"
-              strokeWidth={3}
+              stroke={palette.accent}
+              strokeWidth={2.5}
               fillOpacity={1}
               fill="url(#colorValue)"
               animationDuration={1500}
-              activeDot={{ r: 6, fill: "#0b0f14", stroke: "#7cff4e", strokeWidth: 2 }}
+              activeDot={{ r: 5, fill: palette.surface, stroke: palette.accent, strokeWidth: 2 }}
             />
           </AreaChart>
         </ResponsiveContainer>

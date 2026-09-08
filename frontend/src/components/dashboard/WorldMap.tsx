@@ -2,6 +2,14 @@
 
 import { memo } from "react";
 import { ComposableMap, Geographies, Geography, Graticule } from "react-simple-maps";
+import { palette, intensityRamp } from "@/lib/theme";
+
+// react-simple-maps ships no types for the geography objects it yields, so
+// declare the subset this component actually reads.
+interface GeoFeature {
+  rsmKey: string;
+  properties: { name: string };
+}
 
 // TopoJSON URL
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
@@ -17,24 +25,25 @@ const getRandomIntensity = (seed: string) => {
   return normalized > 0.75 ? normalized : 0.1; 
 };
 
-// Premium Heatmap Colors (Dark Slate to Neon Green)
+// Choropleth bucket: intensity picks a step off the shared emerald ramp, so
+// density reads as ink weight against the white canvas.
 const getColor = (intensity: number) => {
-  if (intensity < 0.2) return "#1e293b"; // Base Dark (Slate 800) - Inactive
-  if (intensity < 0.4) return "#14532d"; // Dark Green (Green 900)
-  if (intensity < 0.6) return "#15803d"; // Medium Green (Green 700)
-  if (intensity < 0.8) return "#22c55e"; // Bright Green (Green 500)
-  return "#7cff4e"; // Neon Highlight for hotspots
+  if (intensity < 0.2) return intensityRamp[0]; // inactive
+  if (intensity < 0.4) return intensityRamp[1];
+  if (intensity < 0.6) return intensityRamp[2];
+  if (intensity < 0.8) return intensityRamp[3];
+  return intensityRamp[4]; // hotspot
 };
 
 function WorldMap({ scale = 110 }: { scale?: number }) {
   return (
-    // Container: Dark background, glowing subtle border
-    <div className="w-full h-full flex flex-col items-center justify-center relative overflow-hidden rounded-2xl bg-[#0b0f14] border border-white/5">
+    // Container: white panel with a hairline border
+    <div className="w-full h-full flex flex-col items-center justify-center relative overflow-hidden rounded-2xl bg-surface border border-line">
 
       {/* Title / Overlay Info */}
       <div className="absolute top-6 left-6 z-10 pointer-events-none">
-        <h3 className="text-sm font-medium text-[#e6eaf0]">Sales Audit Heatmap</h3>
-        <p className="text-xs text-[#9aa4b2]">Global transaction density</p>
+        <h3 className="text-sm font-medium text-fg">Sales Audit Heatmap</h3>
+        <p className="text-xs text-muted">Global transaction density</p>
       </div>
 
       <div className="w-full h-full pt-10 px-4 pb-2">
@@ -46,13 +55,13 @@ function WorldMap({ scale = 110 }: { scale?: number }) {
           }}
           style={{ width: "100%", height: "100%", transition: "all 300ms" }}
         >
-          {/* Subtle Grid Lines for a premium technical look */}
-          <Graticule stroke="rgba(255,255,255,0.02)" strokeWidth={0.5} />
+          {/* Subtle graticule for orientation, kept below the country fills */}
+          <Graticule stroke={palette.line} strokeWidth={0.5} />
 
           {/* Map Geometries (Countries) */}
           <Geographies geography={geoUrl}>
-            {({ geographies }: { geographies: any[] }) =>
-              geographies.map((geo: any) => {
+            {({ geographies }: { geographies: GeoFeature[] }) =>
+              geographies.map((geo) => {
                 // Calculate intensity for this specific country
                 const intensity = getRandomIntensity(geo.rsmKey || geo.properties.name);
                 
@@ -62,20 +71,19 @@ function WorldMap({ scale = 110 }: { scale?: number }) {
                     geography={geo}
                     // Apply dynamic heatmap color
                     fill={getColor(intensity)}
-                    // Dark borders to separate countries cleanly
-                    stroke="#0b0f14" 
-                    strokeWidth={0.5}
+                    // Hairline must be darker than the palest ramp step, or
+                    // adjacent inactive countries merge into one shape.
+                    stroke={palette.lineStrong}
+                    strokeWidth={0.4}
                     style={{
                       default: { outline: "none" },
                       hover: {
-                        fill: "#7cff4e", // Turn neon green on hover
+                        fill: palette.accent,
                         outline: "none",
                         transition: "all 150ms",
                         cursor: "pointer",
-                        // Add a glow effect on hover for that "premium" feel
-                        filter: "drop-shadow(0 0 6px rgba(124, 255, 78, 0.4))"
                       },
-                      pressed: { fill: "#22c55e", outline: "none" },
+                      pressed: { fill: palette.accentHover, outline: "none" },
                     }}
                   />
                 );

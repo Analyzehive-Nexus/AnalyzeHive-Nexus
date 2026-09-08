@@ -3,399 +3,334 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  User,
-  MapPin,
-  Mail,
-  Phone,
-  Shield,
-  Key,
-  Bell,
-  Activity,
-  Clock,
-  ChevronRight,
-  LogOut,
-  Zap,
-  Briefcase,
-  Award,
-  Layers,
-  Settings
+  Clock, FileSignature, Key, LogOut, MapPin, ScrollText, ShieldCheck, User,
 } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
+import { formatDateTime, formatRelative } from "@/lib/format";
+import { useCurrentUser, formatRole, initialsOf } from "@/lib/userStore";
 
-// --- Mock Data ---
-const userProfile = {
-  name: "Alex Chen",
-  role: "Senior Supply Chain Architect",
-  location: "San Francisco, CA",
-  email: "alex.chen@analyzehive.com",
-  phone: "+1 (555) 012-3456",
-  clearance: "Level 4 (High Security)",
-  tasksCompleted: 142,
-  efficiency: "98.5%",
-  rank: "Elite",
-  joined: "March 2024",
-  bio: "Specializing in predictive logistics and autonomous supply chain optimization. Leading the implementation of AI-driven distribution models across the APAC region."
-};
+/**
+ * Profile and governance.
+ *
+ * A regulated-industry account is described by its designation, the permissions
+ * its role actually carries, the signature credential attributable to it, and
+ * what it has signed. That replaced the gamified "Missions / Rank: Elite"
+ * placeholders, which had no backing data at all.
+ */
 
 interface ActivityEntry {
-  id: number;
-  action: string;
-  time: string;
-  type: string;
+  id: number; action: string; occurredAt: string | null; type: string;
 }
 
-const skills = ["Logistics AI", "Risk Management", "Demand Forecasting", "Network Security"];
+interface Governance {
+  designation: string | null;
+  department: string | null;
+  grade: number | null;
+  homeRegion: string | null;
+  permissions: { id: string; description: string; requiresSignature: boolean }[];
+  credential: { id: string; issuedAt: string | null; expiresAt: string | null; status: string } | null;
+  signoffs: {
+    id: number; recordType: string; recordId: string; meaning: string;
+    signedAt: string | null; credentialId: string; payloadHash: string;
+  }[];
+  scopes: { type: string; id: string }[];
+}
+
+const MEANING_STYLE: Record<string, string> = {
+  approved: "border-ok-line bg-ok-tint text-ok",
+  reviewed: "border-info-line bg-info-tint text-info",
+  authored: "border-line bg-elevated text-muted",
+  responsibility: "border-warn-line bg-warn-tint text-warn",
+};
 
 export default function ProfilePage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
-  const [notifications, setNotifications] = useState(true);
-  const [twoFactor, setTwoFactor] = useState(true);
+  const user = useCurrentUser();
 
-  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
-  const [activityTotal, setActivityTotal] = useState(0);
-  const [activityExpanded, setActivityExpanded] = useState(false);
-
-  const [showPasswordForm, setShowPasswordForm] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordMessage, setPasswordMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
-
+  const [gov, setGov] = useState<Governance | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const loadActivity = (limit: number) => {
-    api
-      .get<{ activity: ActivityEntry[]; total: number }>(`/api/profile/activity?limit=${limit}`)
-      .then((data) => {
-        setActivityLog(data.activity);
-        setActivityTotal(data.total);
-      })
-      .catch(() => setActivityLog([]));
-  };
-
   useEffect(() => {
-    loadActivity(4);
+    let cancelled = false;
+    api.get<Governance>("/api/governance/me")
+      .then((d) => !cancelled && setGov(d)).catch(() => {});
+    api.get<{ activity: ActivityEntry[] }>("/api/profile/activity?limit=6")
+      .then((d) => !cancelled && setActivity(d.activity)).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
-
-  const handleViewAll = () => {
-    setActivityExpanded(true);
-    loadActivity(activityTotal || 20);
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordSubmitting(true);
-    setPasswordMessage(null);
-    try {
-      await api.post("/api/auth/change-password", { currentPassword, newPassword });
-      setPasswordMessage({ type: "success", text: "Password updated successfully." });
-      setCurrentPassword("");
-      setNewPassword("");
-      setShowPasswordForm(false);
-    } catch (err) {
-      setPasswordMessage({
-        type: "error",
-        text: err instanceof Error ? err.message : "Failed to update password.",
-      });
-    } finally {
-      setPasswordSubmitting(false);
-    }
-  };
 
   const handleLogout = async () => {
     setLoggingOut(true);
-    try {
-      await api.logout();
-    } finally {
-      router.push("/login");
-    }
+    try { await api.logout(); } finally { router.push("/login"); }
   };
 
   return (
-    <div className="min-h-screen bg-transparent w-full text-slate-300 p-8 animate-fade-in-up">
-      
-      {/* Header */}
-      <header className="flex justify-between items-center pb-6 border-b border-white/5 mb-8">
-          <div className="flex items-center gap-2 text-sm text-[#94a3b8]">
-            <span className="hover:text-white transition-colors cursor-pointer">Dashboard</span>
-            <ChevronRight className="w-4 h-4" />
-            <span className="text-[#e6eaf0] font-medium">Operative Profile</span>
+    <div className="space-y-8 text-muted">
+      <PageHeader />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* ------------------------------------------------- identity */}
+        <section className="space-y-6 lg:col-span-1">
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent-tint text-base font-semibold text-accent">
+                {user ? initialsOf(user.name) : <User className="h-6 w-6" aria-hidden="true" />}
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-semibold text-fg">{user?.name ?? "Loading…"}</h2>
+                <p className="truncate text-sm text-subtle">{user?.email ?? "—"}</p>
+              </div>
+            </div>
+
+            <dl className="mt-6 space-y-3 border-t border-line pt-5 text-sm">
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-subtle">Designation</dt>
+                <dd className="text-right text-fg">{gov?.designation ?? "—"}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-subtle">Department</dt>
+                <dd className="text-right text-fg">{gov?.department ?? "—"}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-subtle">System role</dt>
+                <dd>
+                  <span className="rounded-md border border-accent-line bg-accent-tint px-2 py-0.5 text-xs font-medium text-accent">
+                    {user ? formatRole(user.role) : "—"}
+                  </span>
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-subtle">Sign-in method</dt>
+                <dd className="text-fg">Google</dd>
+              </div>
+            </dl>
           </div>
-          <div className="flex items-center gap-3">
-             <span className="text-xs font-mono text-green-400 bg-green-500/10 px-3 py-1 rounded border border-green-500/20">
-                SYSTEM STATUS: OPTIMAL
-             </span>
+
+          {/* ------------------------------------- assigned scope */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-fg">
+              <MapPin className="h-4 w-4 text-subtle" aria-hidden="true" /> Assigned scope
+            </h3>
+            <p className="mb-4 text-xs text-subtle">
+              Warehouses and territories this account may act on
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(gov?.scopes ?? []).map((s) => (
+                <span
+                  key={`${s.type}-${s.id}`}
+                  className="rounded-md border border-line bg-elevated px-2 py-1 text-xs text-muted"
+                >
+                  <span className="text-subtle capitalize">{s.type}:</span> {s.id}
+                </span>
+              ))}
+              {gov?.scopes.length === 0 && (
+                <p className="text-sm text-subtle">No scope restriction — full estate access.</p>
+              )}
+            </div>
           </div>
-      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        
-        {/* Left Column: Identity Card */}
-        <div className="lg:col-span-1 space-y-6">
-           <div className="bg-[#0f141b] border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
-               {/* Background detail */}
-               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[60px] rounded-full" />
-               
-               <div className="flex flex-col items-center text-center relative z-10">
-                  <div className="w-24 h-24 rounded-full border-2 border-[#7cff4e] p-1 mb-4 relative shadow-[0_0_20px_rgba(124,255,78,0.2)]">
-                      <div className="w-full h-full rounded-full bg-slate-800 flex items-center justify-center overflow-hidden">
-                          <User className="w-10 h-10 text-white opacity-80" />
-                          {/* Simulated Avatar Image would go here */}
-                      </div>
-                      <div className="absolute bottom-0 right-0 w-6 h-6 bg-[#0b0f14] rounded-full flex items-center justify-center border border-[#7cff4e]">
-                          <div className="w-2 h-2 rounded-full bg-[#7cff4e] animate-pulse" />
-                      </div>
-                  </div>
-                  
-                  <h2 className="text-xl font-bold text-white mb-1">{userProfile.name}</h2>
-                  <p className="text-sm text-[#7cff4e] font-medium mb-4">{userProfile.role}</p>
-                  
-                  <div className="flex items-center gap-2 text-xs text-[#94a3b8] mb-6 bg-white/5 px-3 py-1.5 rounded-full">
-                      <MapPin className="w-3 h-3" /> {userProfile.location}
-                  </div>
-
-                  <div className="w-full space-y-3 pt-6 border-t border-white/5">
-                      <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#64748b]">Clearance</span>
-                          <span className="text-white font-mono bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 text-[10px]">{userProfile.clearance}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#64748b]">Member Since</span>
-                          <span className="text-white">{userProfile.joined}</span>
-                      </div>
-                  </div>
-               </div>
-           </div>
-
-           {/* Skills Card */}
-           <div className="bg-[#0f141b] border border-white/10 rounded-2xl p-6">
-               <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                   <Zap className="w-4 h-4 text-yellow-400" /> Expertise
-               </h3>
-               <div className="flex flex-wrap gap-2">
-                   {skills.map((skill) => (
-                       <span key={skill} className="text-xs text-[#94a3b8] bg-white/5 px-2 py-1 rounded hover:bg-white/10 transition cursor-default border border-white/5">
-                           {skill}
-                       </span>
-                   ))}
-               </div>
-           </div>
-        </div>
-
-        {/* Right Column: Main Content */}
-        <div className="lg:col-span-3 space-y-6">
-            
-            {/* Stats Row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-[#0f141b] border border-white/10 rounded-xl p-5 hover:border-[#7cff4e]/30 transition group relative overflow-hidden">
-                    <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition">
-                        <Briefcase className="w-12 h-12 text-[#7cff4e]" />
-                    </div>
-                    <p className="text-xs text-[#94a3b8] mb-1">Total Missions</p>
-                    <h3 className="text-2xl font-bold text-white">{userProfile.tasksCompleted}</h3>
-                    <div className="mt-2 text-[10px] text-green-400 flex items-center gap-1">
-                        <span>+12 this week</span>
-                    </div>
+          {/* ------------------------------------- signature credential */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-fg">
+              <FileSignature className="h-4 w-4 text-subtle" aria-hidden="true" />
+              Digital signature credential
+            </h3>
+            <p className="mb-4 text-xs text-subtle">
+              21 CFR Part 11 §11.100 — unique to this individual, never reassigned
+            </p>
+            {gov?.credential ? (
+              <dl className="space-y-2 rounded-lg border border-line bg-elevated p-4 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-subtle">Credential ID</dt>
+                  <dd className="font-mono text-xs text-fg">{gov.credential.id}</dd>
                 </div>
-                
-                <div className="bg-[#0f141b] border border-white/10 rounded-xl p-5 hover:border-blue-500/30 transition group relative overflow-hidden">
-                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition">
-                        <Activity className="w-12 h-12 text-blue-500" />
-                    </div>
-                    <p className="text-xs text-[#94a3b8] mb-1">Efficiency Rating</p>
-                    <h3 className="text-2xl font-bold text-white">{userProfile.efficiency}</h3>
-                    <div className="mt-2 text-[10px] text-blue-400 flex items-center gap-1">
-                        <span>Top 2% of agents</span>
-                    </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-subtle">Status</dt>
+                  <dd>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs capitalize ${
+                        gov.credential.status === "active"
+                          ? "border-ok-line bg-ok-tint text-ok"
+                          : "border-danger-line bg-danger-tint text-danger"
+                      }`}
+                    >
+                      {gov.credential.status}
+                    </span>
+                  </dd>
                 </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-subtle">Expires</dt>
+                  <dd className="text-xs text-fg">{formatDateTime(gov.credential.expiresAt)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-sm text-subtle">
+                No signature credential issued. This account cannot apply Part 11 signatures.
+              </p>
+            )}
+          </div>
+        </section>
 
-                <div className="bg-[#0f141b] border border-white/10 rounded-xl p-5 hover:border-purple-500/30 transition group relative overflow-hidden">
-                     <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition">
-                        <Award className="w-12 h-12 text-purple-500" />
-                    </div>
-                    <p className="text-xs text-[#94a3b8] mb-1">Current Rank</p>
-                    <h3 className="text-2xl font-bold text-white">{userProfile.rank}</h3>
-                    <div className="mt-2 text-[10px] text-purple-400 flex items-center gap-1">
-                        <span>Next: Master</span>
-                    </div>
-                </div>
+        {/* ------------------------------------------------ right column */}
+        <section className="space-y-6 lg:col-span-2">
+          {/* ---------------------------------------- permissions (RBAC) */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-fg">
+              <ShieldCheck className="h-4 w-4 text-subtle" aria-hidden="true" />
+              Role-based access
+            </h3>
+            <p className="mb-4 text-xs text-subtle">
+              Granted by the <span className="font-medium">{user ? formatRole(user.role) : "—"}</span> role.
+              Actions marked <span className="font-medium">signature required</span> cannot be
+              completed without applying the credential above.
+            </p>
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(gov?.permissions ?? []).map((p) => (
+                <li key={p.id} className="rounded-lg border border-line bg-elevated p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-mono text-[11px] text-fg">{p.id}</span>
+                    {p.requiresSignature && (
+                      <span className="shrink-0 rounded-full border border-warn-line bg-warn-tint px-1.5 py-0.5 text-[9px] font-medium uppercase text-warn">
+                        Signature
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-subtle">{p.description}</p>
+                </li>
+              ))}
+              {gov?.permissions.length === 0 && (
+                <li className="text-sm text-subtle">No permissions granted.</li>
+              )}
+            </ul>
+          </div>
+
+          {/* ---------------------------------------- Part 11 sign-offs */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-fg">
+              <ScrollText className="h-4 w-4 text-subtle" aria-hidden="true" />
+              21 CFR Part 11 sign-off history
+            </h3>
+            <p className="mb-4 text-xs text-subtle">
+              §11.50 — each entry records the signer, the moment, and the meaning of the signature.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-subtle">
+                  <tr className="border-b border-line">
+                    <th className="py-2 text-left font-medium">Record</th>
+                    <th className="py-2 text-left font-medium">Meaning</th>
+                    <th className="py-2 text-left font-medium">Credential</th>
+                    <th className="py-2 text-right font-medium">Signed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(gov?.signoffs ?? []).map((s) => (
+                    <tr key={s.id} className="border-b border-line last:border-0">
+                      <td className="py-2.5">
+                        <span className="block text-xs capitalize text-fg">
+                          {s.recordType.replace(/_/g, " ")}
+                        </span>
+                        <span className="block font-mono text-[10px] text-subtle">{s.recordId}</span>
+                      </td>
+                      <td className="py-2.5">
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] capitalize ${
+                            MEANING_STYLE[s.meaning] ?? MEANING_STYLE.authored
+                          }`}
+                        >
+                          {s.meaning}
+                        </span>
+                      </td>
+                      <td className="py-2.5 font-mono text-[10px] text-subtle">
+                        {s.credentialId}
+                        {/* The hash is what makes a later mutation detectable. */}
+                        <span className="block opacity-70">#{s.payloadHash.slice(0, 12)}</span>
+                      </td>
+                      <td className="py-2.5 text-right text-xs text-subtle">
+                        {formatDateTime(s.signedAt)}
+                      </td>
+                    </tr>
+                  ))}
+                  {gov?.signoffs.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-6 text-center text-sm text-subtle">
+                        No signatures applied by this account yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            {/* Tabs */}
-            <div className="flex gap-4 border-b border-white/5 pb-1">
-                <button 
-                    onClick={() => setActiveTab('overview')}
-                    className={`pb-3 px-1 text-sm font-medium transition-all relative ${activeTab === 'overview' ? 'text-[#7cff4e]' : 'text-[#94a3b8] hover:text-white'}`}
+          {/* ---------------------------------------- recent activity */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-fg">
+              <Clock className="h-4 w-4 text-subtle" aria-hidden="true" /> Recent activity
+            </h3>
+            {activity.length === 0 ? (
+              <p className="text-sm text-subtle">No activity recorded yet.</p>
+            ) : (
+              <ul className="space-y-4">
+                {activity.map((log) => (
+                  <li
+                    key={log.id}
+                    className="flex items-start gap-3 border-b border-line pb-4 last:border-0 last:pb-0"
+                  >
+                    <span
+                      className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                        log.type === "success" ? "bg-ok" : log.type === "warning" ? "bg-warn" : "bg-info"
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm text-fg">{log.action}</p>
+                      <p className="mt-0.5 text-xs text-subtle">{formatRelative(log.occurredAt)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* ---------------------------------------- security + sign out */}
+          <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-md bg-elevated p-2 text-subtle">
+                  <Key className="h-4 w-4" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-fg">Security</h3>
+                  <p className="mt-1 max-w-prose text-sm text-subtle">
+                    This account signs in with Google. Passwords, two-factor authentication and
+                    account recovery are managed there.
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <a
+                  href="https://myaccount.google.com/security"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-elevated"
                 >
-                    Overview
-                    {activeTab === 'overview' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-[#7cff4e]" />}
-                </button>
-                <button 
-                    onClick={() => setActiveTab('settings')}
-                    className={`pb-3 px-1 text-sm font-medium transition-all relative ${activeTab === 'settings' ? 'text-[#7cff4e]' : 'text-[#94a3b8] hover:text-white'}`}
+                  Manage in Google
+                </a>
+                <button
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-danger transition hover:border-danger-line hover:bg-danger-tint disabled:opacity-50"
                 >
-                    Settings
-                    {activeTab === 'settings' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-[#7cff4e]" />}
+                  <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+                  {loggingOut ? "Signing out…" : "Sign out"}
                 </button>
+              </div>
             </div>
-
-            {/* Tab Content */}
-            <div className="min-h-[300px]">
-                {activeTab === 'overview' ? (
-                    <div className="space-y-6 animate-fade-in-up">
-                        {/* Bio */}
-                        <div className="bg-[#0f141b] border border-white/10 rounded-xl p-6">
-                            <h3 className="text-sm font-bold text-white mb-3">Professional Summary</h3>
-                            <p className="text-sm text-[#94a3b8] leading-relaxed">{userProfile.bio}</p>
-                        </div>
-
-                        {/* Recent Activity */}
-                        <div className="bg-[#0f141b] border border-white/10 rounded-xl p-6">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                    <Clock className="w-4 h-4 text-[#64748b]" /> Recent Activity
-                                </h3>
-                                {!activityExpanded && (
-                                    <button onClick={handleViewAll} className="text-xs text-[#7cff4e] hover:text-[#4ade80]">
-                                        View All
-                                    </button>
-                                )}
-                            </div>
-                            <div className="space-y-4">
-                                {activityLog.map((log) => (
-                                    <div key={log.id} className="flex items-start gap-3 pb-3 border-b border-white/5 last:border-0 last:pb-0">
-                                        <div className={`mt-1 w-2 h-2 rounded-full ${
-                                            log.type === 'success' ? 'bg-green-500' : 
-                                            log.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-                                        }`} />
-                                        <div className="flex-1">
-                                            <p className="text-sm text-[#e6eaf0]">{log.action}</p>
-                                            <p className="text-xs text-[#64748b] mt-0.5">{log.time}</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="space-y-6 animate-fade-in-up">
-                        {/* Settings Panel */}
-                        <div className="bg-[#0f141b] border border-white/10 rounded-xl p-6 space-y-6">
-                            
-                            <div className="flex items-center justify-between pb-4 border-b border-white/5">
-                                <div className="flex items-start gap-3">
-                                    <div className="p-2 bg-blue-500/10 rounded text-blue-400">
-                                        <Bell className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <h4 className="text-sm font-bold text-white">Notifications</h4>
-                                        <p className="text-xs text-[#94a3b8]">Receive alerts for critical supply chain events</p>
-                                    </div>
-                                </div>
-                                <button 
-                                    onClick={() => setNotifications(!notifications)}
-                                    className={`w-10 h-5 rounded-full relative transition-colors ${notifications ? 'bg-blue-500' : 'bg-slate-700'}`}
-                                >
-                                    <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${notifications ? 'left-6' : 'left-1'}`} />
-                                </button>
-                            </div>
-
-                            <div className="flex items-center justify-between pb-4 border-b border-white/5">
-                                <div className="flex items-start gap-3">
-                                    <div className="p-2 bg-purple-500/10 rounded text-purple-400">
-                                        <Shield className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <h4 className="text-sm font-bold text-white">Two-Factor Auth</h4>
-                                        <p className="text-xs text-[#94a3b8]">Secure your account with biometric logic</p>
-                                    </div>
-                                </div>
-                                <button 
-                                    onClick={() => setTwoFactor(!twoFactor)}
-                                    className={`w-10 h-5 rounded-full relative transition-colors ${twoFactor ? 'bg-[#7cff4e]' : 'bg-slate-700'}`}
-                                >
-                                    <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${twoFactor ? 'left-6' : 'left-1'}`} />
-                                </button>
-                            </div>
-
-                            <div>
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-start gap-3">
-                                        <div className="p-2 bg-red-500/10 rounded text-red-400">
-                                            <Key className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <h4 className="text-sm font-bold text-white">Change Password</h4>
-                                            <p className="text-xs text-[#94a3b8]">Update your system access credentials</p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => { setShowPasswordForm((s) => !s); setPasswordMessage(null); }}
-                                        className="px-3 py-1.5 rounded border border-white/10 text-xs text-white hover:bg-white/5 transition"
-                                    >
-                                        {showPasswordForm ? "Cancel" : "Update"}
-                                    </button>
-                                </div>
-
-                                {showPasswordForm && (
-                                    <form onSubmit={handleChangePassword} className="mt-4 space-y-3 pl-11">
-                                        <input
-                                            type="password"
-                                            required
-                                            placeholder="Current password"
-                                            value={currentPassword}
-                                            onChange={(e) => setCurrentPassword(e.target.value)}
-                                            className="w-full bg-[#0b0f14] border border-white/10 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-[#7cff4e]/50"
-                                        />
-                                        <input
-                                            type="password"
-                                            required
-                                            minLength={8}
-                                            placeholder="New password (min 8 characters)"
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            className="w-full bg-[#0b0f14] border border-white/10 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-[#7cff4e]/50"
-                                        />
-                                        <button
-                                            type="submit"
-                                            disabled={passwordSubmitting}
-                                            className="px-4 py-2 rounded-lg bg-[#7cff4e] text-[#0b0f14] text-xs font-bold hover:bg-[#4ade80] transition disabled:opacity-50"
-                                        >
-                                            {passwordSubmitting ? "Updating…" : "Confirm Change"}
-                                        </button>
-                                    </form>
-                                )}
-
-                                {passwordMessage && (
-                                    <p className={`mt-3 pl-11 text-xs ${passwordMessage.type === "success" ? "text-[#7cff4e]" : "text-red-400"}`}>
-                                        {passwordMessage.text}
-                                    </p>
-                                )}
-                            </div>
-
-                        </div>
-
-                        {/* Danger Zone */}
-                        <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 flex justify-between items-center">
-                            <div>
-                                <h4 className="text-sm font-bold text-red-500 mb-1">End Session</h4>
-                                <p className="text-xs text-red-400/70">Securely logout from all active terminals</p>
-                            </div>
-                            <button
-                                onClick={handleLogout}
-                                disabled={loggingOut}
-                                className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-bold transition border border-red-500/20 disabled:opacity-50"
-                            >
-                                <LogOut className="w-4 h-4" /> {loggingOut ? "SIGNING OUT…" : "LOGOUT"}
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-        </div>
-
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import FileDropZone from "@/components/ingestion/FileDropZone";
 import ColumnMapping from "@/components/ingestion/ColumnMapping";
+import PageHeader from "@/components/PageHeader";
 import DataGrid from "@/components/DataGrid";
 import { api } from "@/lib/api";
 
@@ -19,6 +20,7 @@ export default function DataConnectionPage() {
   const [step, setStep] = useState<Step>("upload");
   const [rawColumns, setRawColumns] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
+  const [filename, setFilename] = useState<string>("");
 
   const [columns, setColumns] = useState<{ key: string; label: string }[]>([]);
   const [data, setData] = useState<Record<string, string>[]>([]);
@@ -27,9 +29,14 @@ export default function DataConnectionPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const handleParsed = (cols: { key: string; label: string }[], rows: Record<string, string>[]) => {
+  const handleParsed = (
+    cols: { key: string; label: string }[],
+    rows: Record<string, string>[],
+    name: string
+  ) => {
     setRawColumns(cols.map((c) => c.key));
     setRawRows(rows);
+    setFilename(name);
     setStep("mapping");
   };
 
@@ -53,8 +60,11 @@ export default function DataConnectionPage() {
 
     try {
       const result = await api.post<UploadResult>("/api/ingestion/upload", {
-        columns: mappedColumns,
+        // `original` is the CSV's own header; the backend keeps it beside the
+        // mapped key so a remap does not need a re-upload.
+        columns: mapped.map((m) => ({ key: m.key, label: m.label, original: m.original })),
         rows: mappedRows,
+        filename,
       });
       setUploadResult(result);
     } catch (err) {
@@ -75,29 +85,23 @@ export default function DataConnectionPage() {
   };
 
   return (
-    <>
-      {/* Page Header */}
-      <section className="mb-8 flex items-start justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-[#e6eaf0]">Data Connection</h2>
-          <p className="text-sm text-[#9aa4b2] mt-2 max-w-xl">
-            Upload structured CSV files, map columns to system fields, and push
-            them to the backend before ingestion.
-          </p>
-        </div>
-        {step !== "upload" && (
-          <button
-            onClick={reset}
-            className="text-xs px-3 py-1.5 rounded-md border border-white/10 text-[#9aa4b2] hover:text-white hover:bg-white/5 transition"
-          >
-            Start over
-          </button>
-        )}
-      </section>
+    <div className="space-y-8 text-muted">
+      <PageHeader
+        actions={
+          step !== "upload" && (
+            <button
+              onClick={reset}
+              className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-elevated hover:text-fg"
+            >
+              Start over
+            </button>
+          )
+        }
+      />
 
       {/* Step 1: Upload */}
       {step === "upload" && (
-        <section className="mb-12">
+        <section>
           <FileDropZone onParsed={handleParsed} />
         </section>
       )}
@@ -111,19 +115,19 @@ export default function DataConnectionPage() {
       {step === "preview" && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-[#e6eaf0]">Data Preview</h3>
-            {uploading && <span className="text-xs text-[#9aa4b2]">Uploading…</span>}
+            <h3 className="text-sm font-medium text-fg">Data Preview</h3>
+            {uploading && <span className="text-xs text-muted">Uploading…</span>}
             {uploadResult && (
-              <span className="text-xs text-[#7cff4e]">
+              <span className="text-xs text-accent">
                 Uploaded {uploadResult.receivedRows} rows at{" "}
                 {new Date(uploadResult.receivedAt).toLocaleTimeString()}
               </span>
             )}
-            {uploadError && <span className="text-xs text-red-400">{uploadError}</span>}
+            {uploadError && <span className="text-xs text-danger">{uploadError}</span>}
           </div>
           <DataGrid columns={columns} data={data} />
         </section>
       )}
-    </>
+    </div>
   );
 }

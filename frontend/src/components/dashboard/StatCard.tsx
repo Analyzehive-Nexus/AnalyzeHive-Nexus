@@ -2,6 +2,7 @@
 
 // Import memo for performance optimization
 import { memo } from "react";
+import { palette } from "@/lib/theme";
 
 // StatCard component definition.
 // Displays a single statistic with a title, value, and visual indicators.
@@ -19,12 +20,12 @@ function StatCard({
   const isRisk = title.toLowerCase().includes("risk");
 
   // Determine the accent color based on the status (good, risk, or neutral)
-  const accent = isGood ? "#7cff4e" : isRisk ? "#fbbf24" : "#60a5fa";
+  const accent = isGood ? palette.ok : isRisk ? palette.warn : palette.info;
 
   // Render the card
   return (
-    // Card container: relative positioning, dark background, border, padding, and a hover glow effect
-    <div className="relative rounded-xl bg-[#0f141b] border border-white/5 p-5 glow-hover">
+    // Card container: white panel, hairline border, lifts on hover
+    <div className="relative overflow-hidden rounded-xl bg-surface border border-line p-5 shadow-card glow-hover">
       {/* Accent glow bar at the top */}
       <div
         className="absolute inset-x-0 top-0 h-[2px] rounded-full"
@@ -32,7 +33,7 @@ function StatCard({
       />
 
       {/* Title text */}
-      <p className="text-xs uppercase tracking-wide text-[#9aa4b2]">{title}</p>
+      <p className="text-xs uppercase tracking-wide text-muted">{title}</p>
 
       {/* Value text */}
       <p
@@ -43,7 +44,7 @@ function StatCard({
       </p>
 
       {/* Subtitle / Footer text */}
-      <p className="mt-2 text-xs text-[#6b7280]">Compared to last week</p>
+      <p className="mt-2 text-xs text-subtle">Compared to last week</p>
     </div>
   );
 }

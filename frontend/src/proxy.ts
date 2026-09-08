@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Routes that don't require authentication
-const publicRoutes = ['/login']
+// Routes that don't require authentication. /register must be listed even
+// though it only redirects to /login - without it an anonymous visitor gets
+// bounced through /login?callbackUrl=/register and back for no reason.
+const publicRoutes = ['/login', '/register', '/auth/callback']
 
 export function proxy(request: NextRequest) {
     const token = request.cookies.get('auth_token')?.value

@@ -1,3 +1,5 @@
+import { notifyUserChanged } from "@/lib/userStore";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // What comes from API
@@ -11,7 +13,7 @@ export interface ApiUser {
 // What you might extend locally
 export interface AppUser extends ApiUser {
     // Add any frontend-only properties
-    preferences?: any;
+    preferences?: Record<string, unknown>;
     lastLogin?: string;
 }
 
@@ -83,6 +85,7 @@ class ApiClient {
         if (typeof window === "undefined") return;
         localStorage.removeItem("auth_token");
         localStorage.removeItem("user");
+        notifyUserChanged();
         // Clear cookie properly
         document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
     }
@@ -94,6 +97,9 @@ class ApiClient {
             lastLogin: new Date().toISOString(),
         };
         localStorage.setItem("user", JSON.stringify(appUser));
+        // The `storage` event does not fire in the tab that wrote it, so
+        // useCurrentUser() subscribers here would otherwise show stale data.
+        notifyUserChanged();
     }
 
     getUser(): AppUser | null {
@@ -119,6 +125,13 @@ class ApiClient {
     }
 
     async logout(): Promise<void> {
+        // Revoke the session row before dropping the local copy. Best-effort:
+        // a network failure must still log the user out of this browser.
+        try {
+            await this.request("/api/auth/logout", { method: "POST" });
+        } catch {
+            // ignore - clearing the local token below is the part that matters
+        }
         this.clearToken();
     }
 
@@ -140,6 +153,13 @@ class ApiClient {
     async post<T>(endpoint: string, body?: unknown): Promise<T> {
         return this.request<T>(endpoint, {
             method: "POST",
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+    }
+
+    async put<T>(endpoint: string, body?: unknown): Promise<T> {
+        return this.request<T>(endpoint, {
+            method: "PUT",
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
     }

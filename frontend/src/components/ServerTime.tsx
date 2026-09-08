@@ -40,11 +40,16 @@ export default function ServerTime() {
     };
   }, []);
 
+  // Renders inline in the TopNav. It used to float over the page content as a
+  // fixed pill, which covered whatever sat in the bottom-right corner.
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-[#0f141b] border border-white/10 text-xs text-[#9aa4b2] backdrop-blur-md hover:text-[#e6eaf0] transition">
-      <span className="w-2 h-2 rounded-full bg-[#7cff4e] animate-pulse" />
-      Server Time
-      <span className="font-mono text-[#e6eaf0]">
+    <div
+      className="hidden items-center gap-2 sm:flex"
+      title="Server time, resynced from the backend every 30s"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+      <span className="hidden text-subtle md:inline">Server time</span>
+      <span className="font-mono tabular-nums text-fg">
         {time ? `${time.toUTCString().slice(17, 25)} UTC` : "--:--:-- UTC"}
       </span>
     </div>

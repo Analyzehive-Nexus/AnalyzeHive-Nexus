@@ -1,190 +1,276 @@
 "use client";
 
-import { memo, useState, useEffect } from "react";
-import WorldMap from "@/components/dashboard/WorldMap";
-import { Radio, ShieldCheck, AlertTriangle, Zap, Server, Activity } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle, BatteryLow, MapPin, Radio, Snowflake, Thermometer, Truck,
+} from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import KpiTile from "@/components/dashboard/KpiTile";
+import { api } from "@/lib/api";
+import { formatRelative } from "@/lib/format";
 
-// --- Mock Data ---
+/* ------------------------------------------------------------------ types */
 
-const liveEvents = [
-  { id: 1, type: "success", msg: "Node US-East-1 synchronized", time: "00:01s" },
-  { id: 2, type: "info", msg: "Data packet received from SG-Node", time: "00:03s" },
-  { id: 3, type: "warning", msg: "Latency spike in EU-West cluster", time: "00:12s" },
-  { id: 4, type: "success", msg: "Backup routing confirmed", time: "00:15s" },
-  { id: 5, type: "info", msg: "Inventory batch #9921 tracked", time: "00:22s" },
-  { id: 6, type: "error", msg: "Connection timeout: Node JP-4", time: "00:45s" },
-  { id: 7, type: "success", msg: "Reconnection attempt successful", time: "00:48s" },
-  { id: 8, type: "info", msg: "Audit log updated", time: "01:02s" },
-];
+interface Shipment {
+  id: string;
+  carrier: string | null;
+  mode: string;
+  status: string;
+  tempBand: { minC: number | null; maxC: number | null };
+  origin: string | null;
+  destination: string | null;
+  region: string | null;
+  departedAt: string | null;
+  eta: string | null;
+  loggerCount: number;
+  lastTempC: number | null;
+  lastPingAt: string | null;
+  position: { lat: number; lng: number } | null;
+  openAnomalies: number;
+  excursionReadings: number;
+  inBand: boolean;
+}
 
-const regions = [
-  { name: "North America", status: "Operational", load: "42%", latency: "24ms" },
-  { name: "Europe West", status: "Degraded", load: "89%", latency: "145ms" },
-  { name: "Asia Pacific", status: "Operational", load: "31%", latency: "88ms" },
-  { name: "South America", status: "Maintenance", load: "0%", latency: "--" },
-];
+interface Summary {
+  loggers: { total: number; reporting: number; silent: number; lowBattery: number };
+  shipments: { inTransit: number; exceptions: number };
+  anomalies: {
+    id: number; shipmentId: string; kind: string;
+    severity: string; detail: string; detectedAt: string | null;
+  }[];
+}
 
-// --- Styles ---
-
-
-
-// --- Sub-Components ---
-
-// 1. Live Stats Ticker
-const StatusTicker = ({ label, value, unit, icon: Icon, status = "normal" }: any) => (
-  <div className="flex items-center gap-3 bg-[#0b0f14]/80 border border-white/5 p-3 rounded-lg hover:border-[#7cff4e]/30 transition-colors group">
-    <div className={`w-8 h-8 rounded bg-white/5 flex items-center justify-center ${status === 'warning' ? 'text-yellow-400' : 'text-[#7cff4e]'}`}>
-      <Icon className="w-4 h-4" />
-    </div>
-    <div>
-      <p className="text-[10px] text-[#94a3b8] uppercase tracking-wider">{label}</p>
-      <p className="text-lg font-mono font-semibold text-[#e6eaf0]">
-        {value} <span className="text-xs font-normal text-[#64748b]">{unit}</span>
-      </p>
-    </div>
-  </div>
-);
-
-// 2. Real-time Event Feed
-const EventFeed = () => {
-  return (
-    <div className="h-full bg-[#0b0f14] border border-white/5 rounded-xl p-0 flex flex-col overflow-hidden hover:border-[#7cff4e]/30 transition-colors shadow-2xl shadow-black/50">
-      <div className="p-4 border-b border-white/5 bg-white/[0.02] flex justify-between items-center">
-        <h3 className="text-sm font-semibold text-[#e6eaf0] flex items-center gap-2">
-          <Activity className="w-4 h-4 text-[#7cff4e]" /> Live Event Stream
-        </h3>
-        <span className="flex h-2 w-2">
-           <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-green-400 opacity-75"></span>
-           <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-        </span>
-      </div>
-      
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
-        {liveEvents.map((evt) => (
-          <div key={evt.id} className="flex gap-3 items-start animate-in fade-in slide-in-from-left-2 duration-300">
-             <span className="text-[#64748b] min-w-[50px]">{evt.time}</span>
-             <div className="flex-1">
-               <p className={`
-                 ${evt.type === 'success' ? 'text-green-400' : 
-                   evt.type === 'error' ? 'text-red-400' : 
-                   evt.type === 'warning' ? 'text-yellow-400' : 'text-blue-400'}
-               `}>
-                 {evt.type.toUpperCase()}
-               </p>
-               <p className="text-[#94a3b8]">{evt.msg}</p>
-             </div>
-          </div>
-        ))}
-        {/* Faux infinite scroll fade */}
-        <div className="h-8 bg-gradient-to-t from-[#0b0f14] to-transparent sticky bottom-0" />
-      </div>
-    </div>
-  );
+const ANOMALY_LABEL: Record<string, string> = {
+  customs_delay: "Customs delay",
+  port_congestion: "Port congestion",
+  temp_excursion: "Temperature excursion",
+  route_deviation: "Route deviation",
+  logger_silent: "Logger silent",
 };
 
-// 3. Region Status Cards
-const RegionStatus = () => (
-   <div className="grid grid-cols-1 gap-3">
-      {regions.map((region) => (
-        <div key={region.name} className="bg-[#0b0f14] border border-white/5 p-4 rounded-lg flex items-center justify-between group hover:bg-white/[0.02] transition-colors">
-          <div>
-            <p className="text-xs font-semibold text-[#e6eaf0]">{region.name}</p>
-            <p className="text-[10px] text-[#64748b] mt-0.5">Latency: {region.latency}</p>
-          </div>
-          <div className="text-right">
-             <div className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                region.status === 'Operational' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                region.status === 'Degraded' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                'bg-red-500/10 text-red-400 border-red-500/20'
-             }`}>
-               {region.status}
-             </div>
-             <p className="text-[10px] text-[#64748b] mt-1">Load: {region.load}</p>
-          </div>
-        </div>
-      ))}
-   </div>
-);
+const SEVERITY_STYLE: Record<string, string> = {
+  critical: "border-danger-line bg-danger-tint text-danger",
+  high: "border-danger-line bg-danger-tint text-danger",
+  medium: "border-warn-line bg-warn-tint text-warn",
+  low: "border-info-line bg-info-tint text-info",
+};
 
-// --- Main Page ---
-
-// --- Main Page ---
+/* ------------------------------------------------------------------- page */
 
 export default function LiveOperationsPage() {
-  const [mapScale, setMapScale] = useState(110);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api.get<Summary>("/api/cold-chain/summary")
+        .then((d) => !cancelled && setSummary(d)).catch(() => {});
+      api.get<{ shipments: Shipment[] }>("/api/cold-chain/shipments")
+        .then((d) => !cancelled && setShipments(d.shipments)).catch(() => {});
+    };
+    load();
+    // Telemetry is the point of this screen, so it refreshes on its own.
+    const timer = setInterval(load, 30_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
+  const active = useMemo(
+    () => shipments.find((s) => s.id === selected) ?? null,
+    [shipments, selected]
+  );
 
   return (
-    <div className="relative min-h-screen w-full bg-transparent overflow-hidden">
+    <div className="space-y-8 text-muted">
+      <PageHeader />
 
-      <div className="relative z-10 p-8 space-y-10 perspective-container text-slate-300 selection:bg-[#7cff4e]/30 selection:text-[#7cff4e]">
-        
-        {/* Header Row */}
-        <header className="animate-fade-in-up delay-0">
-            <h1 className="text-2xl font-semibold text-[#e6eaf0] flex items-center gap-3">
-              <Radio className="w-6 h-6 text-[#7cff4e]" />
-              Live Operations Center
-            </h1>
-            <p className="text-sm text-[#94a3b8] mt-1">Real-time infrastructure monitoring & command</p>
-        </header>
-          
-        {/* KPI Grid - Matching Dashboard Sizing & Spacing */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <div className="animate-fade-in-up delay-100"><StatusTicker icon={Zap} label="System Load" value="42" unit="%" /></div>
-            <div className="animate-fade-in-up delay-200"><StatusTicker icon={Server} label="Active Nodes" value="1,024" unit="" /></div>
-            <div className="animate-fade-in-up delay-300"><StatusTicker icon={ShieldCheck} label="Sec. Status" value="Secure" unit="" /></div>
-            <div className="animate-fade-in-up delay-400"><StatusTicker icon={Activity} label="Throughput" value="8.4" unit="GB/s" /></div>
-            <div className="animate-fade-in-up delay-500"><StatusTicker icon={Radio} label="Uptime" value="99.9" unit="%" /></div>
-        </div>
+      {/* ---------------------------------------------------------- KPIs */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiTile
+          label="Active in-transit loggers"
+          value={summary ? `${summary.loggers.reporting}/${summary.loggers.total}` : "—"}
+          sublabel="reporting GPS and temperature"
+          goodDirection="neutral"
+          icon={Radio}
+          emphasis
+        />
+        <KpiTile
+          label="Active route anomalies"
+          value={summary ? String(summary.anomalies.length) : "—"}
+          sublabel={summary ? `${summary.shipments.exceptions} shipments in exception` : undefined}
+          goodDirection="neutral"
+          icon={AlertTriangle}
+          emphasis={(summary?.anomalies.length ?? 0) > 0}
+        />
+        <KpiTile
+          label="Shipments in transit"
+          value={summary ? String(summary.shipments.inTransit) : "—"}
+          sublabel="including customs hold"
+          goodDirection="neutral"
+          icon={Truck}
+        />
+        <KpiTile
+          label="Loggers needing attention"
+          value={summary ? String(summary.loggers.silent + summary.loggers.lowBattery) : "—"}
+          sublabel={summary
+            ? `${summary.loggers.silent} silent · ${summary.loggers.lowBattery} low battery`
+            : undefined}
+          goodDirection="neutral"
+          icon={BatteryLow}
+        />
+      </section>
 
-        {/* Main Workspace (Grid) */}
-        {/* Standardized to h-[400px] to match Dashboard Chart Height */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[400px]"> 
-          
-          {/* Left: Interactive Map (2/3 width) */}
-          <section className="lg:col-span-2 h-full flex flex-col gap-4 animate-fade-in-up delay-500">
-             {/* Map Container */}
-             <div className="flex-1 min-h-0 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative group bg-[#161c24] card-3d-hover">
-                {/* Overlay UI */}
-                <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
-                   <button
-                     onClick={() => setMapScale((s) => Math.min(400, s + 30))}
-                     className="p-2 bg-black/50 backdrop-blur border border-white/10 rounded-lg text-white hover:bg-white/10 transition"
-                   >
-                     +
-                   </button>
-                   <button
-                     onClick={() => setMapScale((s) => Math.max(60, s - 30))}
-                     className="p-2 bg-black/50 backdrop-blur border border-white/10 rounded-lg text-white hover:bg-white/10 transition"
-                   >
-                     -
-                   </button>
-                </div>
-
-                <WorldMap scale={mapScale} />
-             </div>
-          </section>
-
-          {/* Right: Sidebar Infos (1/3 width) */}
-          <section className="h-full flex flex-col gap-6 animate-fade-in-up delay-700">
-            <div className="flex-1 min-h-0 card-3d-hover">
-               <EventFeed />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* ------------------------------------------------ fleet table */}
+        <section className="lg:col-span-2">
+          <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="text-sm font-semibold text-fg">In-transit fleet</h2>
+              <p className="text-xs text-subtle">
+                Live cold-chain telemetry, refreshed every 30 seconds
+              </p>
             </div>
-          </section>
 
-        </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-elevated text-xs text-subtle">
+                  <tr>
+                    <th className="px-5 py-3 text-left font-medium">Shipment</th>
+                    <th className="px-5 py-3 text-left font-medium">Lane</th>
+                    <th className="px-5 py-3 text-right font-medium">Temp</th>
+                    <th className="px-5 py-3 text-right font-medium">ETA</th>
+                    <th className="px-5 py-3 text-right font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipments.map((s) => (
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelected(s.id === selected ? null : s.id)}
+                      className={`cursor-pointer border-t border-line transition hover:bg-elevated ${
+                        s.id === selected ? "bg-accent-tint" : ""
+                      }`}
+                    >
+                      <td className="px-5 py-3">
+                        <span className="block font-mono text-xs text-fg">{s.id}</span>
+                        <span className="block text-xs text-subtle">{s.carrier}</span>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-muted">
+                        {s.origin} → {s.destination}
+                        <span className="ml-1 capitalize text-subtle">· {s.mode}</span>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs tabular-nums ${
+                            // No reading is "unknown", not "out of band" - a
+                            // delivered shipment with no logger is not an alarm.
+                            s.lastTempC === null
+                              ? "border-line bg-elevated text-subtle"
+                              : s.inBand
+                                ? "border-ok-line bg-ok-tint text-ok"
+                                : "border-danger-line bg-danger-tint text-danger"
+                          }`}
+                        >
+                          <Thermometer className="h-3 w-3" aria-hidden="true" />
+                          {s.lastTempC === null ? "—" : `${s.lastTempC.toFixed(1)}°C`}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] text-subtle">
+                          band {s.tempBand.minC}…{s.tempBand.maxC}°C
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs text-muted">
+                        {formatRelative(s.eta)}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] capitalize ${
+                            s.status === "exception"
+                              ? "border-danger-line bg-danger-tint text-danger"
+                              : s.status === "customs"
+                                ? "border-warn-line bg-warn-tint text-warn"
+                                : s.status === "delivered"
+                                  ? "border-line bg-elevated text-subtle"
+                                  : "border-ok-line bg-ok-tint text-ok"
+                          }`}
+                        >
+                          {s.status.replace("_", " ")}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {shipments.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-sm text-subtle">
+                        No shipments are being tracked.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-        {/* Region Status Row - New Row for consistency (like Table row in Dashboard) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           <div className="md:col-span-1">
-              <h3 className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wider mb-4 px-1">Regional Health</h3>
-              <RegionStatus />
-           </div>
-           {/* Placeholder for future expansion or another widget */}
-           <div className="md:col-span-2 bg-[#0b0f14] border border-white/5 rounded-xl p-6 flex items-center justify-center text-[#94a3b8] text-sm border-dashed">
-              System Diagnostics & Calibration Module (Offline)
-           </div>
-        </div>
+            {active && (
+              <div className="border-t border-line bg-elevated px-5 py-4">
+                <h3 className="mb-2 text-xs font-semibold text-fg">{active.id} detail</h3>
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                  <span className="text-subtle">
+                    Loggers <span className="block text-fg">{active.loggerCount}</span>
+                  </span>
+                  <span className="text-subtle">
+                    Out-of-band readings{" "}
+                    <span className={`block ${active.inBand ? "text-fg" : "text-danger"}`}>
+                      {active.excursionReadings}
+                    </span>
+                  </span>
+                  <span className="text-subtle">
+                    Last ping <span className="block text-fg">{formatRelative(active.lastPingAt)}</span>
+                  </span>
+                  <span className="text-subtle">
+                    Position{" "}
+                    <span className="block font-mono text-fg">
+                      {active.position
+                        ? `${active.position.lat.toFixed(3)}, ${active.position.lng.toFixed(3)}`
+                        : "—"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
 
+        {/* -------------------------------------------------- anomalies */}
+        <section className="rounded-xl border border-line bg-surface p-5 shadow-card">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-fg">
+            <Snowflake className="h-4 w-4 text-subtle" aria-hidden="true" /> Route anomalies
+          </h2>
+          <p className="mb-4 text-xs text-subtle">Unresolved, most severe first</p>
+
+          <ul className="space-y-3">
+            {(summary?.anomalies ?? []).map((a) => (
+              <li
+                key={a.id}
+                className={`rounded-lg border p-3 ${SEVERITY_STYLE[a.severity] ?? SEVERITY_STYLE.low}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">
+                    {ANOMALY_LABEL[a.kind] ?? a.kind}
+                  </span>
+                  <span className="font-mono text-[10px] opacity-80">{a.shipmentId}</span>
+                </div>
+                <p className="mt-1 text-xs opacity-90">{a.detail}</p>
+                <p className="mt-1 flex items-center gap-1 text-[10px] opacity-70">
+                  <MapPin className="h-2.5 w-2.5" aria-hidden="true" />
+                  {formatRelative(a.detectedAt)}
+                </p>
+              </li>
+            ))}
+            {summary?.anomalies.length === 0 && (
+              <li className="text-sm text-subtle">No open anomalies. All lanes nominal.</li>
+            )}
+          </ul>
+        </section>
       </div>
     </div>
   );

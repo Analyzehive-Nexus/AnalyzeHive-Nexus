@@ -1,16 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { 
-  Shield, 
-  Globe, 
-  Zap, 
-  Server, 
-  Database, 
-  Smartphone,
+import {
+  Shield,
+  Globe,
+  Zap,
+  Database,
   AlertTriangle,
-  Radio
 } from "lucide-react";
+import { palette } from "@/lib/theme";
 
 // Types
 export interface Node {
@@ -130,22 +128,22 @@ export default function NetworkGraph({
   // Color helpers
   const getStatusColor = (status: string) => {
     switch (status) {
-        case 'safe': return '#4ade80'; // green-400
-        case 'warning': return '#fbbf24'; // amber-400
-        case 'critical': return '#f87171'; // red-400
-        case 'neutral': return '#94a3b8'; // slate-400
-        default: return '#94a3b8';
+        case 'safe': return palette.ok;
+        case 'warning': return palette.warn;
+        case 'critical': return palette.danger;
+        case 'neutral': return palette.faint;
+        default: return palette.faint;
     }
   };
 
   return (
-    <div className="w-full h-full relative bg-[#0b0f14] overflow-hidden rounded-xl border border-[#1e293b]">
+    <div className="w-full h-full relative bg-surface overflow-hidden rounded-xl border border-line">
         
         {/* Controls Overlay */}
         <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-20">
-            <button onClick={() => setScale(s => Math.min(s + 0.2, 3))} className="p-2 bg-[#1e293b]/80 text-white rounded hover:bg-[#334155]">+</button>
-            <button onClick={() => setScale(s => Math.max(s - 0.2, 0.5))} className="p-2 bg-[#1e293b]/80 text-white rounded hover:bg-[#334155]">-</button>
-            <button onClick={() => {setScale(1); setOffset({x:0, y:0})}} className="p-2 bg-[#1e293b]/80 text-white rounded hover:bg-[#334155] text-xs">Reset</button>
+            <button onClick={() => setScale(s => Math.min(s + 0.2, 3))} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">+</button>
+            <button onClick={() => setScale(s => Math.max(s - 0.2, 0.5))} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">-</button>
+            <button onClick={() => {setScale(1); setOffset({x:0, y:0})}} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong text-xs">Reset</button>
         </div>
 
         <svg 
@@ -159,15 +157,8 @@ export default function NetworkGraph({
             onWheel={handleWheel}
         >
             <defs>
-                <filter id="glow-node">
-                    <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
-                    <feMerge>
-                        <feMergeNode in="coloredBlur"/>
-                        <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                </filter>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" opacity="0.5" />
+                    <polygon points="0 0, 10 3.5, 0 7" fill={palette.faint} opacity="0.7" />
                 </marker>
             </defs>
 
@@ -177,28 +168,16 @@ export default function NetworkGraph({
                 <defs>
                      <linearGradient id="grad-scan" x1="0%" y1="0%" x2="100%" y2="0%">
                         <stop offset="0%" stopColor="transparent" />
-                        <stop offset="100%" stopColor="#7cff4e" />
+                        <stop offset="100%" stopColor={palette.accent} />
                      </linearGradient>
-                     <filter id="glow-node">
-                        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
-                        <feMerge>
-                            <feMergeNode in="coloredBlur"/>
-                            <feMergeNode in="SourceGraphic"/>
-                        </feMerge>
-                    </filter>
                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" opacity="0.5" />
+                        <polygon points="0 0, 10 3.5, 0 7" fill={palette.faint} opacity="0.7" />
                     </marker>
-                    <style>
-                        {`
-                           /* Linear scan animations handled via SVG animate tags */
-                        `}
-                    </style>
                 </defs>
 
                 {/* Grid Background */}
                 <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="0.5" opacity="0.3"/>
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke={palette.line} strokeWidth="1"/>
                 </pattern>
                 <rect width="2000" height="2000" x="-500" y="-500" fill="url(#grid)" />
 
@@ -207,9 +186,9 @@ export default function NetworkGraph({
                     <g pointerEvents="none">
                        <defs>
                           <linearGradient id="soft-scan-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                             <stop offset="0%" stopColor="#7cff4e" stopOpacity="0" />
-                             <stop offset="50%" stopColor="#7cff4e" stopOpacity="0.15" />
-                             <stop offset="100%" stopColor="#7cff4e" stopOpacity="0" />
+                             <stop offset="0%" stopColor={palette.accent} stopOpacity="0" />
+                             <stop offset="50%" stopColor={palette.accent} stopOpacity="0.10" />
+                             <stop offset="100%" stopColor={palette.accent} stopOpacity="0" />
                           </linearGradient>
                        </defs>
                        
@@ -227,9 +206,9 @@ export default function NetworkGraph({
                            <rect x="-150" y="-2000" width="300" height="5000" fill="url(#soft-scan-grad)" />
                            
                            {/* Sharp Center Line - subtle */}
-                           <line x1="0" y1="-2000" x2="0" y2="3000" stroke="#7cff4e" strokeWidth="1" strokeOpacity="0.5">
+                           <line x1="0" y1="-2000" x2="0" y2="3000" stroke={palette.accent} strokeWidth="1" strokeOpacity="0.35">
                                 {/* Optional: Pulse opacity of the line */}
-                                <animate attributeName="stroke-opacity" values="0.3;0.6;0.3" dur="2s" repeatCount="indefinite" />
+                                <animate attributeName="stroke-opacity" values="0.2;0.45;0.2" dur="2s" repeatCount="indefinite" />
                            </line>
                        </g>
                     </g>
@@ -238,8 +217,8 @@ export default function NetworkGraph({
                 {/* Radar Pulse Effect (Centered on first node usually 'You') */}
                 {nodes.length > 0 && (
                     <>
-                        <circle cx={nodes[0].x} cy={nodes[0].y} r="300" stroke="#7cff4e" strokeWidth="1" strokeOpacity="0.05" fill="none" />
-                        <circle cx={nodes[0].x} cy={nodes[0].y} r="150" stroke="#7cff4e" strokeWidth="1" strokeOpacity="0.1" fill="none" />
+                        <circle cx={nodes[0].x} cy={nodes[0].y} r="300" stroke={palette.accentLine} strokeWidth="1" fill="none" />
+                        <circle cx={nodes[0].x} cy={nodes[0].y} r="150" stroke={palette.accentLine} strokeWidth="1" fill="none" />
                     </>
                 )}
 
@@ -257,14 +236,14 @@ export default function NetworkGraph({
                             <line 
                                 x1={source.x} y1={source.y} 
                                 x2={target.x} y2={target.y} 
-                                stroke={isHovered ? "#7cff4e" : "#334155"} 
+                                stroke={isHovered ? palette.accent : palette.lineStrong}
                                 strokeWidth={isHovered ? 2 : 1}
-                                strokeOpacity={isHovered ? 0.8 : 0.4}
+                                strokeOpacity={isHovered ? 0.9 : 1}
                                 style={{ transition: "all 0.3s" }}
                             />
                             {/* Animated Particle Packet */}
                             {(isActive || isHovered) && (
-                                <circle r="3" fill="#7cff4e">
+                                <circle r="3" fill={palette.accent}>
                                     <animateMotion 
                                         dur={isActive ? "1.5s" : "3s"} 
                                         repeatCount="indefinite"
@@ -278,7 +257,6 @@ export default function NetworkGraph({
 
                 {/* Nodes */}
                 {nodes.map((node) => {
-                    const isSelected = false; // Can implement selection state
                     const isHovered = hoveredNode === node.id;
                     const isCenter = node.type === 'internal'; // Identify "YOU"
                     const color = getStatusColor(node.status);
@@ -294,15 +272,16 @@ export default function NetworkGraph({
                             className="cursor-pointer transition-all duration-300"
                             style={{ opacity: hoveredNode && hoveredNode !== node.id && !links.some(l => (l.source === node.id && l.target === hoveredNode) || (l.target === node.id && l.source === hoveredNode)) ? 0.3 : 1 }}
                         >
-                            {/* Extra Glow for Center Node */}
+                            {/* Soft halo marking the "you" node */}
                             {isCenter && (
-                                <circle r={node.value + 30} fill="#7cff4e" fillOpacity="0.05" className="animate-pulse">
+                                <circle r={node.value + 30} fill={palette.accent} fillOpacity="0.06" className="animate-pulse">
                                 </circle>
                             )}
 
-                            {/* Glow */}
+                            {/* Attention halo - a flat tint rather than a blur, which
+                                reads as a smudge on a white ground. */}
                             {(isHovered || node.status === 'critical' || isCenter) && (
-                                <circle r={node.value + 15} fill={isCenter ? '#7cff4e' : color} fillOpacity="0.1" filter="url(#glow-node)">
+                                <circle r={node.value + 15} fill={isCenter ? palette.accent : color} fillOpacity="0.12">
                                     <animate attributeName="r" values={`${node.value + 10};${node.value + 20};${node.value + 10}`} dur="2s" repeatCount="indefinite" />
                                 </circle>
                             )}
@@ -310,15 +289,15 @@ export default function NetworkGraph({
                             {/* Core Node */}
                             <circle 
                                 r={node.value} 
-                                fill="#0f141b" 
-                                stroke={isCenter ? '#7cff4e' : color} 
+                                fill={palette.surface}
+                                stroke={isCenter ? palette.accent : color}
                                 strokeWidth={isHovered || isCenter ? 3 : 2}
                                 className="transition-all duration-300"
                             />
                             
                             {/* Icon */}
-                            <foreignObject x={-10} y={-10} width={20} height={20} className="pointer-events-none flex items-center justify-center text-white" style={{ overflow: 'visible' }}>
-                                <div className={`flex items-center justify-center w-full h-full text-${isCenter ? '[#7cff4e]' : node.status === 'safe' ? 'green-400' : node.status === 'critical' ? 'red-400' : 'slate-400'}`}>
+                            <foreignObject x={-10} y={-10} width={20} height={20} className="pointer-events-none flex items-center justify-center text-fg" style={{ overflow: 'visible' }}>
+                                <div className="flex items-center justify-center w-full h-full" style={{ color: isCenter ? palette.accent : color }}>
                                     {getIcon(node.type)}
                                 </div>
                             </foreignObject>
@@ -327,7 +306,7 @@ export default function NetworkGraph({
                             <text 
                                 y={node.value + 15} 
                                 textAnchor="middle" 
-                                fill={isHovered || isCenter ? "#fff" : "#94a3b8"} 
+                                fill={isHovered || isCenter ? palette.fg : palette.subtle}
                                 fontSize="12" 
                                 fontWeight={isHovered || isCenter ? "bold" : "normal"}
                                 className="pointer-events-none select-none"
@@ -337,7 +316,7 @@ export default function NetworkGraph({
                             
                             {/* Status Indicator Dot */}
                             {node.status === 'critical' && (
-                                <circle cx={node.value * 0.707} cy={-node.value * 0.707} r="4" fill="#f87171" stroke="#0f141b" strokeWidth="1" />
+                                <circle cx={node.value * 0.707} cy={-node.value * 0.707} r="4" fill={palette.danger} stroke={palette.surface} strokeWidth="1.5" />
                             )}
                         </g>
                     );
