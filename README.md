@@ -2,7 +2,7 @@
 
 AnalyzeHive is an enterprise analytics/operations dashboard ("Ent-OS") covering commercial auditing, supply-chain planning, market intelligence, live map operations, and data ingestion. It is a three-service system: a Next.js frontend, an Express API gateway, and a FastAPI GPU-inference service.
 
-> **Project status: prototype.** The backend and inference services are functional scaffolds with real network wiring end-to-end, but auth and inference logic are mocked (see [Implementation status](#implementation-status)).
+> **Project status: prototype.** Auth and all dashboard data are backed by Cloudflare D1; the inference service is still a mock (see [Implementation status](#implementation-status)).
 
 ---
 
@@ -86,13 +86,13 @@ analyzehive-dashboard/
 │   │   └── routes/              One router file per feature area (see API reference below)
 │   ├── api/index.ts            Vercel serverless entrypoint: exports the app as the handler
 │   ├── public/index.html       Static placeholder served at / on the deployed API host
-│   └── vercel.json             Routes all paths to the function; 30s max duration
+│   ├── vercel.json             Routes all paths to the function; 30s max duration
+│   └── migrations/             Cloudflare D1 (SQLite) schema migrations
 ├── inference/                  FastAPI inference service
 │   ├── app/main.py              /health and /predict (currently a mock payload)
 │   ├── api/index.py            Vercel serverless entrypoint: re-exports the ASGI app
 │   ├── public/index.html       Static placeholder served at / on the deployed inference host
 │   └── vercel.json             Routes all paths to the function; 60s max duration, 1 GB
-├── supabase/migrations/        Reserved for future SQL migrations (empty)
 └── brain.md                    Persistent project memory/instructions for AI coding assistants
 ```
 
@@ -183,25 +183,31 @@ All routes are mounted under `http://localhost:8000` by the backend.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/health` | Backend liveness check |
-| POST | `/api/auth/login` | Body: `{ email, password }`. Any credentials succeed (mock). Returns `{ access_token, token_type, user }` |
-| GET | `/api/auth/me` | Requires `Authorization: Bearer <token>`. Returns the session's user |
-| POST | `/api/auth/change-password` | Requires auth. Body: `{ currentPassword, newPassword }` (min 8 chars). Prototype: doesn't persist |
-| POST | `/api/auth/forgot-password` | Body: `{ email }`. Prototype: no real email sent |
+| GET | `/api/auth/google` | Starts sign-in: mints a single-use `state` row and redirects to Google |
+| GET | `/api/auth/google/callback` | Validates `state`, exchanges the code, matches an **existing** user, hands the token back in the URL fragment |
+| GET | `/api/auth/me` | Requires `Authorization: Bearer <token>`. Resolves the session against D1 |
+| POST | `/api/auth/logout` | Revokes the calling session |
+| GET/POST | `/api/admin/users` | Admin-only. The only way an account comes into existence |
 | POST | `/api/infer` | Proxies to FastAPI `POST /predict`; `502` if inference service is down |
-| GET | `/api/alerts` | List critical alerts |
-| GET | `/api/alerts/:id` | Alert detail |
-| GET | `/api/notifications` | List notifications |
-| POST | `/api/notifications/:id/read` | Mark a notification read |
-| GET | `/api/market-radar/signals?q=` | Search market signals |
-| GET | `/api/market-radar/nodes/:id/analysis` | Full analysis for a node |
-| GET | `/api/commercial-truth/hierarchy?region=` | Rep/region hierarchy, optionally filtered |
-| GET | `/api/commercial-truth/audit/:id/log` | Per-rep audit trail |
-| GET | `/api/profile/activity?limit=` | Activity history |
-| GET | `/api/system-status/services` | Service health list |
-| GET | `/api/system-status/incidents` | Incident list |
-| GET | `/api/supply-chain/watchlist` | Full watchlist |
-| GET | `/api/supply-chain/plan` | Redistribution plan |
-| POST | `/api/ingestion/upload` | Body: `{ columns: string[], rows: any[] }`. Returns `{ id, receivedRows, receivedColumns, receivedAt }` |
+| GET | `/api/alerts` | Open (unresolved) alerts, newest first. Each has `createdAt` (ISO-8601) |
+| GET | `/api/alerts/:id` | Alert detail. `404` for an unknown or out-of-scope id |
+| GET | `/api/notifications` | `{ notifications, unread }`. `read` is **per user**, from `notification_reads` |
+| POST | `/api/notifications/:id/read` | Marks read for the calling user only. Idempotent; `404` for an unknown id |
+| GET | `/api/market-radar/signals?q=` | Signals newest first. `q` matches title/source; `%` and `_` are escaped, not wildcards |
+| GET | `/api/market-radar/nodes/:id/analysis` | Newest analysis for the node + its activity lines. `200` with an empty reading when none exists |
+| GET | `/api/commercial-truth/hierarchy?region=` | Reps + current-month metrics + `managerId`, and the region list. `region` accepts an id (`north`) or a name (`North`) |
+| GET | `/api/commercial-truth/audit/:id/log` | Per-rep audit trail, oldest first, with `occurredAt` and `flagged` |
+| GET | `/api/profile/activity?limit=` | **The caller's own** activity, newest first. `limit` clamps to 1–100 (default 4) |
+| GET | `/api/system-status/services` | Services with `uptimePct` and the newest probe's `latencyMs` (`null` if never probed) |
+| GET | `/api/system-status/incidents` | Incidents newest first, with `startedAt`/`resolvedAt` |
+| GET | `/api/supply-chain/watchlist` | Batches, soonest expiry first. `daysToExpiry` is computed at query time; `valueMinor` is integer paise |
+| GET | `/api/supply-chain/plan` | Newest `draft`/`approved` plan with its ordered steps |
+| POST | `/api/ingestion/upload` | Body: `{ columns: [{ key, label, original? }], rows: object[], filename? }`. **Persists** to `datasets`/`dataset_columns`/`dataset_rows`. Returns `{ id, receivedRows, receivedColumns, receivedAt }`. `413` over 5,000 rows |
+
+Every data route reads Cloudflare D1 and answers **`503`, never a stale 200**, if the
+database is unreachable. Timestamps are ISO-8601 UTC and money is integer minor
+units — display strings ("2m ago", "₹52,000", "120 days") are built in the UI by
+`frontend/src/lib/format.ts`.
 
 FastAPI (`http://localhost:8001`, internal only):
 
@@ -212,27 +218,23 @@ FastAPI (`http://localhost:8001`, internal only):
 
 ## Authentication flow
 
-1. User submits the login form → `api.login(email, password)` → `POST /api/auth/login`.
-2. Express accepts **any** email (password is ignored), fabricates a user record, and returns it alongside a token that is just the user record base64url-encoded behind a `mock.` prefix — **stateless and unsigned**. It is stateless deliberately: on Vercel each invocation can land on a fresh instance, so an in-process session `Map` would drop sessions between requests.
-3. The frontend stores the token in `localStorage` (`auth_token`, `user`) **and** as a cookie (`auth_token`, `SameSite=Lax`, 1-day max-age) — the cookie is what `proxy.ts` checks server-side; `localStorage` is what `ApiClient` reads for the `Authorization` header on every subsequent request.
-4. Reloading a page re-validates via `GET /api/auth/me` (`verifyToken()`), which Express answers by decoding the bearer token — no server-side lookup involved.
-5. Logout clears both stores client-side (`api.logout()`); there is no server-side session revocation endpoint.
-
-This is a real network contract end-to-end but not real security — see below.
+1. User clicks sign in → `GET /api/auth/google` → Google, guarded by a single-use `state` row.
+2. The callback exchanges the code and looks the account up in `users`. **Nothing in that path creates a user**, which is what makes sign-up impossible: an admin seeds or invites the row first.
+3. Express mints an opaque random token and stores only its **SHA-256 hash** in `sessions`, then hands the raw token back through the URL **fragment** (`/auth/callback#token=…`) so it never reaches a server log or `Referer`.
+4. The frontend stores it in `localStorage` (read by `ApiClient`) **and** a cookie (read by `proxy.ts`), then strips the fragment from history.
+5. Every authenticated request resolves the bearer against D1, so suspending an account or logging out revokes live sessions immediately. A D1 outage answers `503` — never a passing auth check.
 
 ## Implementation status
 
 Both `backend/` and `inference/` are **prototype scaffolds**, not production services:
 
-- **No database.** All state (uploaded data acknowledgements, notification read-flags, etc.) lives in in-memory JS objects and is lost on restart — and on Vercel, between invocations.
-- **No real auth.** Any email/password combination logs in successfully; the token is an unsigned base64 blob that anyone can forge, not a real per-user JWT.
-- **No real inference.** FastAPI's `/predict` returns a hardcoded mock payload — no PyTorch/TensorRT model is loaded.
-- **CSV ingestion doesn't persist data** — `/api/ingestion/upload` just acknowledges row/column counts.
+- **No real inference.** FastAPI's `/predict` returns a hardcoded mock payload — no PyTorch/TensorRT model is loaded. This is the last mocked layer in the stack.
+- **No row-level security.** D1 has none, so region scoping is only as good as the query layer. Every scopeable read goes through `backend/src/db/scope.ts` for exactly that reason; it is a no-op while every account is an admin.
+- **Some frontend panels still hold local arrays** — the network graph on Market Radar, the Live Operations map, and the dashboard's batch/inventory widgets have no API route behind them yet.
 
 Suggested upgrade path when real infrastructure is available:
-1. Replace the unsigned mock token with real user storage + signed JWT verification (the `encodeToken`/`decodeToken` pair in `backend/src/routes/auth.ts` is the seam).
-2. Keep FastAPI's `/predict` request/response contract stable; swap the mock body for real PyTorch/TensorRT calls once a model and GPU are available.
-3. Only introduce something like NVIDIA Triton Inference Server if/when serving multiple models across multiple GPUs is actually needed — premature before then.
+1. Keep FastAPI's `/predict` request/response contract stable; swap the mock body for real PyTorch/TensorRT calls once a model and GPU are available.
+2. Only introduce something like NVIDIA Triton Inference Server if/when serving multiple models across multiple GPUs is actually needed — premature before then.
 
 ## Deploying to Vercel
 
@@ -275,7 +277,7 @@ If the last call returns `502 Inference service unavailable`, `PYTHON_SERVICE_UR
 ### Things to know before relying on this
 
 - **No GPU on Vercel.** Vercel's Python functions are CPU-only, so the inference service deploys today *only because `/predict` returns a mock*. Real PyTorch/TensorRT work cannot run here — that is what the [target deployment hardware](#target-deployment-hardware) is for. Vercel is appropriate for the frontend and gateway; the inference service will need to move to a GPU host, at which point only `PYTHON_SERVICE_URL` has to change.
-- **In-memory state does not survive.** Writes like `POST /api/notifications/:id/read` mutate a module-level array. Each invocation may hit a fresh instance, so those writes are effectively discarded. This is a prototype limitation, not a Vercel one — it needs a database either way.
+- **Every query is an HTTPS round trip.** D1 bindings only exist inside Workers, so this Express backend reaches D1 over the REST API at 50–200ms per call — and `requireAuth` spends one before the route spends its own. Batch multi-statement work (`batch`/`batchQuery` in `backend/src/db/d1.ts`) rather than issuing calls in a loop. D1 also caps **bound parameters at 100 per statement**, which is why `/api/ingestion/upload` inserts rows 33 at a time.
 - **Preview deployments get fresh URLs.** Because `NEXT_PUBLIC_API_URL` is build-time, a preview frontend still points at whatever backend URL was configured for that environment. Set the env vars per-environment (Production / Preview) if you want previews wired to a separate backend.
 - **`npm install` on the frontend needs `legacy-peer-deps`.** `frontend/.npmrc` sets this, which is what makes Vercel's install step succeed — see [Known gotchas](#known-gotchas).
 

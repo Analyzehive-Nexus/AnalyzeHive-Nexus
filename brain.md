@@ -72,6 +72,7 @@ Verified everything with real Playwright browser runs against the actual dev ser
 - Separately, `ServerTime.tsx` also had a classic SSR anti-pattern: `useState(new Date())` evaluates at both server-render and client-hydration time with different timestamps, mismatching. Fixed by starting state as `null` and only setting the real value client-side in `useEffect`. While in there, also made it source the time from the backend (`GET /api/health` now returns `time: new Date().toISOString()`) instead of the browser's own clock, with a 30s resync + local 1s tick against the computed offset — it's genuinely "server" time now, not just relabeled client time.
 
 ## Database Decision (2026-07-28)
+> **SUPERSEDED 2026-08-27** — Supabase is no longer the database. See *Database Decision Reversal* below. The roles/scoping guidance in the last bullet still stands and is implemented; everything about Supabase (including the auth plan) does not.
 - Decided on **Supabase (Postgres)** as the project's database, admin-only for now (see Agent Instructions below re: roles). Reasoning: most domains here (users/sessions, alerts, commercial-truth hierarchy/audit logs, watchlist) are relational; Postgres `JSONB` covers the one schema-flexible need (arbitrary CSV columns from `/api/ingestion/upload`) without a second database. Ruled out MongoDB as a second store for now — not worth the operational overhead (two connections, no cross-store transactions) until/unless ingestion genuinely outgrows `JSONB`.
 - Created `supabase/migrations/` at the **repo root** (not nested in `backend/`) so it's ready for the Supabase CLI's own convention (`supabase init`/`supabase link` will drop `config.toml` into this same folder without any rework) — it's project-level config for one Postgres instance, even though only `backend/` will query it.
 - Still prototype-stage: no actual Supabase project is linked yet, no migrations written, `backend/` still uses in-memory mock data/sessions. This just reserves the right location.
@@ -115,3 +116,145 @@ First real deploy of `backend/` failed with `No entrypoint found in output direc
 - **Update Frequently**: Whenever making architectural decisions, implementing a significant workaround (like the auth mock), or adding new tech stack dependencies, update this file so future sessions are aware of the changes.
 - **Git Commits**: Never add a `Co-Authored-By` trailer or give any co-author credit to any AI agent in git commit messages.
 - **No assistant references in the repo**: nothing tracked in git should name a specific AI assistant or vendor — not in code, comments, docs, or commit messages. Keep wording generic ("AI coding assistants"). Assistant-specific config directories are gitignored at the repo root for the same reason.
+
+## Database Decision Reversal (2026-08-27)
+**Supabase is out. The database is Cloudflare D1 (SQLite).** This reverses the 2026-07-28 decision above; that section is kept for the reasoning, not the conclusion.
+
+- **Schema lives at `backend/migrations/0001_initial_schema.sql`** — 24 tables, 13 indexes, D1/SQLite dialect, verified to apply clean against `sqlite3` with FK/CHECK/`json_valid` constraints all confirmed to reject bad data. A `PORTING NOTES` block at the foot of that file lists the Postgres deltas if this is ever reversed again.
+- **`supabase/migrations/` deleted** — it only ever held a `.gitkeep` reserving the location. Nothing was written there.
+- **The JSONB argument is resolved, not abandoned.** Postgres was chosen partly because `JSONB` covered arbitrary CSV columns from `/api/ingestion/upload`. SQLite's equivalent is `TEXT` + `CHECK (json_valid(data))`, queried with `json_extract()`, and indexed per-field via a generated column. Confirmed with `EXPLAIN QUERY PLAN` that this produces a real index seek (`SEARCH ... USING INDEX`), not a table scan. The MongoDB ruling from July still holds; the trigger for revisiting is now "ingestion outgrows SQLite JSON", not "outgrows JSONB".
+- **Consequence: auth must be built, not adopted.** The July plan was to let Supabase Auth replace the mock login "rather than building real JWT verification from scratch". D1 has no auth product, so that is now on us. The `sessions` table in the schema is the intended replacement for the unsigned stateless token (see the Vercel log for why it went stateless); a real table makes logout revocable, which the current token cannot be.
+- **Consequence: no Row Level Security. This one is permanent and needs discipline.** The `region_id`/`store_id` scoping columns exist on every scopeable table as the July note advised, and on Postgres they would have been the RLS predicate — the database itself refusing to return another region's rows. D1 has no RLS, so scoping is only ever as good as the query layer. With one admin account that is theoretical. The day a second role exists, **a forgotten `WHERE region_id = ?` is a data leak with nothing behind it.** Mitigation to apply when roles land: funnel every scopeable read through one query helper that takes the caller's scope as a required argument, so the check cannot be forgotten per-route.
+
+## Auth Rewrite Guidance (2026-08-27)
+Not yet done — recorded so the constraint isn't rediscovered later.
+
+- **Current state is worse than "mock", and the route gate does not change that.** `POST /api/auth/login` destructures `{ email }` and never reads `password` at all — any string logs in as `admin`. The token is `"mock."` + base64url of the user JSON, unsigned, so it is forgeable offline: verified by minting `{"id":"999","role":"admin"}` by hand and having `/api/auth/me` and `/api/alerts` both accept it with a 200. `requireAuth` (added 2026-08-27) gates all data routes, but it validates this forgeable credential — the door exists, the lock does not.
+- **Write it with WebCrypto, not Node `crypto`/`Buffer`/`bcrypt`.** WebCrypto exists in both Node 20+ and the Cloudflare Workers runtime; native `bcrypt` and `Buffer` do not survive the Workers move. Writing auth against WebCrypto now means it ports for free instead of being written twice. This is the single highest-leverage constraint on that work.
+
+## D1 + Google Auth Implementation (2026-08-27)
+Implements the D1 decision above and replaces the mock login. **The data routes are NOT yet on D1** — see "Still on mock data" at the end.
+
+**Transport: D1 REST API, chosen deliberately over the Workers binding.** D1 bindings (`env.DB`) only exist inside the Workers runtime; this backend is Express on Node, so every statement is an HTTPS round trip to Cloudflare (budget 50–200ms). `backend/src/db/d1.ts` is the only file that knows this — it exposes `query/first/run/batch`, so the Workers move means swapping the fetch for `env.DB.prepare()` and nothing else. **Use `batch()` for multi-statement work**; three separate calls cost three round trips. Note D1 has no interactive transactions over REST, so a batch is *not* a rollback unit. `CLOUDFLARE_D1_API_BASE` overrides the endpoint (used by the test stub).
+
+**Auth is Google-only and invite-only.**
+- `GET /api/auth/google` → mints a single-use `state` row, redirects to Google. `GET /api/auth/google/callback` → validates state, exchanges the code, then looks the account up in `users`. **There is no branch in the callback that creates a user** — that is what makes signup impossible, not a flag.
+- Match order is `google_sub` first, then invited `email`. Google emails can change; `sub` cannot.
+- The ID token's signature is intentionally *not* re-verified: it arrives directly from Google's token endpoint over TLS in response to a client-secret-authenticated request, which Google documents as not requiring local validation. `iss`/`aud`/`exp`/`email_verified` **are** checked. An unverified email would let someone claim an invite issued to another address.
+- Token handoff to the frontend uses the URL **fragment** (`/auth/callback#token=…`), not a query string — fragments never reach a server, so the token stays out of access logs and `Referer`. The callback page strips it from history via `replaceState`.
+
+**Sessions are real rows now.** `sessions.id` stores the **SHA-256 hash** of the token, never the token, so a leaked table cannot be replayed. `requireAuth` resolves the bearer against D1 on every request — that is the cost of revocability, and it is a second round trip per authenticated call on this transport. A D1 outage returns **503, never 200** — an auth check that fails open is worse than an outage.
+
+**All crypto is WebCrypto + Uint8Array — no `Buffer`, no `node:crypto`.** This is load-bearing: `backend/src/auth/tokens.ts` moves to Workers unchanged. The old Buffer-based token codec would not have. **Do not reintroduce `Buffer` here.**
+
+**Password endpoints are gone** (`/login`, `/change-password`, `/forgot-password` all 404). Google owns credentials. The frontend's password form and "Forgot Key?" were removed; Profile now links to Google account security instead.
+
+**Bootstrap is a seeded row, and it is a manual step.** `migrations/0002_seed.sql` contains `REPLACE_WITH_YOUR_GOOGLE_EMAIL` — onboarding runs through admin-only `/api/admin/users`, so the first admin cannot be invited through the app. Edit that line before applying, and the email must match the Google account exactly.
+
+**Verified** with a stub that speaks D1's REST envelope over a real sqlite file, so the code takes its genuine HTTP path: 22 auth/admin assertions (hand-minted `mock.` token now 401s; employee gets 403 from `/api/admin`; suspension revokes live sessions immediately; self-suspend/demote/delete blocked; logout kills the token) and 19 OAuth assertions (state persisted, single-use, expiry and replay rejected, four open-redirect payloads normalised to `/`). The token exchange was confirmed reaching Google's real endpoint.
+
+**Still on mock data:** all eleven data route files (`alerts`, `notifications`, `marketRadar`, `commercialTruth`, `profile`, `systemStatus`, `supplyChain`, `ingestion`) still return hardcoded module-level arrays. `0002_seed.sql` already contains equivalent rows, so this is a mechanical swap to `query()` — but until it happens, the app reads from arrays and writes still vanish.
+
+
+## Data Routes on D1 (2026-08-30)
+Closes the "Still on mock data" item above. Every data route now reads D1; the arrays are gone. **The database is live** — `analyzehive_nexus`, uuid `3de436f3-f0e2-43bc-8256-747e10cf5610`, both migrations applied, credentials in `backend/.env` (Vercel needs the same three vars, and `CLOUDFLARE_D1_DATABASE_ID` is the **uuid**, not the name — the name is silently accepted by nothing and 404s the REST path).
+
+**`batch()` never worked against the real API and login depended on it.** It posted a bare JSON array; Cloudflare answers `Expected object, received array`. The wire format is `{"batch":[{sql,params}...]}`. The stub used in the August 27 verification accepted the array form, which is exactly the class of bug a stub cannot catch — the auth callback batches its session insert, so **first sign-in would have failed in production**. Fixed in `d1.ts` and noted in the doc comment. Anything else verified only against that stub deserves one real round trip before it is believed.
+
+**D1 caps bound parameters at 100 per statement** — not SQLite's 999 — and fails at execution with `too many SQL variables`. `/api/ingestion/upload` therefore inserts 33 rows (99 params) and 20 columns (100 params) per statement, ≤50 statements per HTTP call. Uploads are capped at 5,000 rows. A mid-upload failure deletes the parent `datasets` row so a partial dataset does not survive; a batch is not a rollback unit, so that cleanup is manual and deliberate.
+
+**`batchQuery()` is new** alongside `batch()`: same one-round-trip envelope but it returns each statement's rows, for pages that need two independent reads (hierarchy + region list, activity + its count).
+
+**Region scoping now has one chokepoint,** `src/db/scope.ts`, applied to every scopeable read. This is the mitigation the D1 decision note called for. It is a no-op while every account is an admin, and fails closed for a scoped user with no region (broadcast rows only). Do not hand-write a `region_id` filter in a route.
+
+**Presentation moved to the UI, as the schema always intended.** The API sends ISO-8601 UTC, integer paise, and `daysToExpiry`; `frontend/src/lib/format.ts` renders "2m ago", "₹52,000", "120 days". `toIso()` in `src/db/rows.ts` is load-bearing: D1 returns `'YYYY-MM-DD HH:MM:SS'` with no zone marker, which every browser would otherwise parse as **local** time. Days-to-expiry is computed per query, so it counts down instead of freezing.
+
+**Verified against the live database**, not a stub: a temporary active user + session was inserted directly into D1, all 14 endpoints exercised over real HTTP, then the user, its session, and two test datasets were deleted (`users` is back to the two bootstrap admins; `sessions`, `datasets`, `dataset_rows`, `notification_reads`, `activity_log` all empty). Checked along the way: per-user read state, `q=50%` escaping to zero matches rather than everything, 404s for unknown and out-of-scope ids, `limit=abc` clamping, a 250-row upload landing as rows 0–249, and the 5,001-row 413.
+
+**Still mocked / not yet wired:** FastAPI `/predict`. Frontend-side local arrays remain in the Market Radar network graph, Live Operations map, and the dashboard's batch/inventory widgets — those have no API route behind them at all, so they are new endpoints, not a swap. `activity_log` is only written on sign-in, so Profile's activity list is genuinely short until more actions write to it.
+
+## Light Theme Conversion (2026-09-08)
+The dashboard was a dark "terminal" UI (near-black `#0b0f14`/`#0f141b` surfaces, neon-green `#7cff4e` accent). It is now a **light professional workspace theme, and light only** — the dark palette was replaced outright, not made switchable. Accent is **deep emerald `#047857`**, chosen to keep the green brand identity while holding contrast on white; the neon green was unusable on a light ground.
+
+**Colours are now semantic tokens, not hexes. Do not reintroduce a raw colour.**
+- `frontend/src/app/globals.css` has a Tailwind v4 `@theme` block defining the whole palette. Tokens are named by *role*: structure (`canvas`, `surface`, `elevated`, `sunken`, `line`, `line-strong`), text by descending emphasis (`fg`, `muted`, `subtle`, `faint`), brand (`accent`, `accent-hover`, `accent-tint`, `accent-line`) and status (`ok`/`warn`/`danger`/`info`, each with a `-tint` fill and `-line` border). Use `bg-surface`, `text-muted`, `border-line` etc. — a palette change should stay a single-file edit.
+- Three elevation tokens replaced the dark theme's coloured glows: `shadow-card` (resting panel), `shadow-raised` (hover), `shadow-overlay` (modals, dropdowns, floating pills). Every `shadow-[0_0_Npx_rgba(124,255,78,…)]` neon glow is gone; on white they read as smudges, not depth.
+- **`frontend/src/lib/theme.ts` mirrors the same palette as JS constants.** Recharts, `WorldMap` and `NetworkGraph` paint via SVG attributes and inline styles, which cannot read Tailwind utilities, so they import `palette` (and `intensityRamp` for the choropleth). Keep this file and the `@theme` block in step — they are the two halves of one palette.
+
+**Surface hierarchy on light is the inverse of the old one, and mapping it wrong is the easy mistake.** On dark, "darker = further back". On light it is "canvas (`#f6f8fa`) behind, surface (white) for cards, elevated/sunken for insets *inside* a card". A nested panel is `bg-elevated`, not `bg-canvas`.
+
+**Things that broke in the conversion and would break again:**
+- **Translucent dark idioms don't survive.** `bg-white/5`, `border-white/10`, `bg-black/50` were dark-theme shorthand for "slightly lighter/darker than the parent". They map to real tokens; the only legitimate survivor is the modal scrim, now `bg-slate-900/40`. Two `bg-black/*` values were *inset panels*, not scrims, and became muddy grey blocks until caught in a screenshot.
+- **`text-white` is usually `text-fg`, but not always.** Where white text sits on a *solid* accent/status fill or on a saturated `bg-*-500` (the `field_reps.color` avatars from `0002_seed.sql`), it must stay literally `text-white`. Same for `text-black` on accent buttons, which became `text-white`.
+- **A white hairline between two pale choropleth fills is invisible**, so inactive countries merged into one blob. `WorldMap`'s country stroke must stay *darker* than the palest ramp step (`palette.lineStrong`).
+- Fixed in passing: `NetworkGraph` built its node-icon colour with a template literal (`` text-${…} ``). Tailwind never sees runtime-built class names, so that icon was unstyled all along; it is now an inline `style={{ color }}`.
+- `body` no longer forces `font-family: Arial` — it uses the `--font-geist-sans` that `layout.tsx` was already loading and previously overriding for nothing.
+
+**Verified** with `tsc --noEmit`, `npm run lint` and `npm run build` all clean, plus real Chromium screenshots of all nine routes at 1440×900 (backend deliberately not running — the theme, not the data, was under test; pages fell back to their empty states). Two defects were found *only* in the screenshots, not the diff: the muddy inset panels and the dissolving world map.
+
+## Professional-Feel Pass (2026-09-08)
+Follow-on to the light theme conversion, same day. The theme was already clean; what still read as unserious was structure, invented content, and motion.
+
+**One route map now feeds three consumers.** `frontend/src/lib/nav.ts` exports `NAV_ITEMS` plus `navItemFor()`/`breadcrumbFor()`. The Sidebar's nav list, the TopNav breadcrumb and every page heading read from it. **Adding a route means adding one entry there** — previously the Sidebar held its own array, each page hardcoded its own title and breadcrumb, and the TopNav breadcrumb said "Dashboard › Command Center" on all eight routes regardless of where you were.
+
+**`frontend/src/components/PageHeader.tsx` is the only page-heading pattern.** A page renders `<PageHeader />` with no props; title and subtitle come from the route map. `actions` takes page-level controls. Don't hand-roll a header.
+
+**AppShell owns the page container.** Padding and `max-w-[1600px]` live once in `AppShell`'s content wrapper. Pages had five different wrappers between them (`p-4 md:p-8`, `p-6 md:p-8 max-w-[1600px]`, `p-8`, plus two using `min-h-screen` *inside* the already-scrolling shell). **A page must not re-add its own padding, max-width or `min-h-screen`.**
+
+**Invented content was deleted, not restyled.** This is the biggest single change and the one most likely to be re-introduced by copying an old pattern:
+- Profile rendered a fabricated persona with no backing column — location, "Clearance: Level 4 (High Security)", "Total Missions 142", "Efficiency Rating / Top 2% of agents", "Current Rank: Elite / Next: Master", an invented professional summary and a skills list. The page was rewritten to show only what the system knows: identity from the session, role, account id, sign-in method, and the real activity log. A "Two-Factor Auth" toggle that changed nothing is gone — Google owns 2FA for these accounts.
+- TopNav's "NVIDIA GPU Cluster: Active" and "Last Sync: Salesforce (1m ago) · SAP (3m ago)" were string literals presented as telemetry. Removed. The same GPU literal was also on Supply Chain Physics.
+- Header status pills that asserted state nothing checked: "Neural Network: Active", "Audit Engine: Online", "Live Monitoring", "SYSTEM STATUS: OPTIMAL", and System Status's "All Systems Operational" next to the title while the panel below reported the truth. Removed; the real controls (scan toggle, region filter, refresh) survive in `PageHeader actions`.
+- Live Operations' dashed "System Diagnostics & Calibration Module (Offline)" placeholder box. Removed.
+- Sci-fi copy: "Operative Profile", "Identify yourself to proceed", "Restricted Operational Area", "Ent-OS v2.4".
+
+**Currency was mixed in one view.** Supply Chain Physics showed inventory as `₹103Cr`/`₹10Cr` but projected savings via `toLocaleString("en-US", {currency:"USD"})`. Now `formatInr()` like everything else — note it takes **minor units (paise)**, matching the API.
+
+**Motion is now disciplined, and `prefers-reduced-motion` is honoured** in `globals.css` — a blanket rule, since every animation here is decorative and loses no information when stopped. `.animate-fade-in-up` went from 0.7s/20px to 0.28s/6px with stagger delays cut proportionally (every navigation used to look like it was loading). `.card-3d-hover` no longer translates or scales — lifting a chart or table on hover made the layout feel unstable; it is a shadow change now. The decorative `animate-float` on the transfer icon and login orbs is gone.
+
+**Per-route tab titles needed a server layout each.** The root layout sets `title.template = "%s · AnalyzeHive Nexus"` and `robots: noindex`. Every page is a client component, so **none of them can export `metadata`** — each route folder has a tiny `layout.tsx` whose only job is that export. Two other approaches were tried and rejected: setting `document.title` in an effect (Next re-applies its own metadata afterwards and wins) and rendering `<title>` for React 19 to hoist (yields three `<title>` tags, browser takes the first). The root `/` keeps the plain default deliberately.
+
+**Verified** with `tsc --noEmit`, `npm run lint`, `npm run build` all clean, and Chromium screenshots of all eight routes at 1440×900 plus a title assertion per route. The backend was up but the preview cookie is a forged token, so data routes 401 and pages render their empty states — layout and chrome were what was under test.
+
+**Watch out:** a `str.replace()` over JSX closing tags without a count limit silently ate a `</div>` from two sub-components in `commercial-truth/page.tsx` (both restored). Prefer indexed edits or assert the occurrence count. Separately, `p-*` followed by `/max-w-*` inside a `{/* … */}` JSX comment closes the comment early — the `*/` is real.
+
+## Pharmaceutical Domain Build (2026-09-08)
+Implements a full gap-analysis spec: the app was a generic operations dashboard wearing pharma labels. It is now a pharmaceutical supply-chain system, full stack. **Migrations 0003 and 0004 are applied to the live database.**
+
+### Schema — `0003_pharma_domain.sql` (+ `0004_pharma_seed.sql`)
+38 new tables, 25 indexes, plus four `ALTER TABLE ... ADD COLUMN` on `users` and `inventory_batches`. Both files validate against `sqlite3` and the seed is idempotent (`INSERT OR IGNORE` / `UPDATE`), so re-running is safe.
+
+**A third money convention joins the two from 0001: one canonical currency.** Every `*_minor` column is INR paise. Display currency is a per-user preference resolved through `fx_rates` at read time. **Never store the same amount in two currencies** — they will drift. This fixes the reported ₹/$ inconsistency properly rather than by hardcoding a symbol.
+
+Domains added: currency/FX · governance (designations, permissions, role_permissions, signature_credentials, part11_signoffs, audit_trail, user_scopes) · warehouses · command-centre KPIs (expiry_risk_snapshots, erp_sync_status) · cold chain (shipments, iot_loggers, logger_readings, route_anomalies) · freight & kinetics (freight_lanes, arrhenius_profiles, sto_writebacks) · field force (hcps, stockists, hcp_visits, stockist_sales, call_recordings, call_snippets, hcp_objections, rep_effectiveness) · market (patents, formulary_placements, regulatory_events, share_of_voice, clinical_trials) · discovery (discovery_programs, disease_models, compound_candidates) · platform telemetry (inference_metrics, ingestion_throughput).
+
+**`audit_trail` is append-only by convention only.** D1 cannot `REVOKE UPDATE/DELETE`. Nothing in `backend/src` issues either against it, and `governance.ts` deliberately exposes no write endpoint. On Postgres this becomes a real grant — noted in the porting notes.
+
+### Backend
+New routers: `currency.ts`, `governance.ts`, `commandCenter.ts`, `coldChain.ts`, `discovery.ts`. Extended: `commercialTruth.ts`, `supplyChain.ts`, `marketRadar.ts`, `systemStatus.ts`. All wired in `app.ts` behind `requireAuth`.
+
+**Arrhenius is computed in `supplyChain.ts`, and the units are load-bearing.** `k = A·exp(-Ea/RT)`; taking the ratio of rate constants at two temperatures cancels the unknown pre-exponential factor A, so shelf life scales by `exp(Ea/R·(1/T − 1/Tref))`. **Temperatures must be Kelvin** — doing this in Celsius silently produces nonsense. Verified against the Q10 rule: Ea=83 kJ/mol gives ~2–3× rate per 10 °C (730 d at 5 °C → 16 d at 38 °C).
+
+Other computed endpoints: `/simulate` returns net salvage yield, thermal runway and the **stockout-risk inversion** check (does relieving expiry at the destination strand the source below its safety stock); `/visits` triangulates a claimed visit against both the clinic geofence and stockist secondary sales.
+
+### Frontend
+New: `lib/currency.tsx`, `lib/filters.tsx`, `components/WorkspaceControls.tsx` (global date range + region + currency in the header), `components/dashboard/KpiTile.tsx`, `components/supply/ArrheniusCurve.tsx`, `components/commercial/AudioWaveform.tsx`, `components/discovery/DiseaseModel3D.tsx`, and the `/drug-discovery` route. Every screen rewritten against the new endpoints.
+
+**3D disease modelling uses `three` + `@react-three/fiber` + `@react-three/drei`** (installed with `--legacy-peer-deps`, as everything here must be). It is `dynamic(..., { ssr: false })` — WebGL cannot render server-side, and this keeps the three.js bundle off every other route's chunk.
+
+**`KpiTile` takes `goodDirection` for a reason:** "up" is not universally good. Capital saved rising is progress; value-at-risk rising is not. Colouring both green would mislead on the executive screen.
+
+### Traps found during this build — all cost real time
+1. **`Intl.NumberFormat` with `notation: "compact"` is not SSR-safe.** Node's ICU renders `₹0.00` where Chrome renders `₹0`, a hydration mismatch on every money value. `format()` now returns `—` until the rate table has loaded, which also happens to be the honest answer.
+2. **`react-hooks/set-state-in-effect` (React Compiler lint) rejects `setState` in an effect body.** Reading `localStorage` that way fails lint; `useSyncExternalStore` is the correct primitive and `filters.tsx` uses it. A `setState` inside a `.then()` callback is fine — that is why `ServerTime` always passed.
+3. **Seed dates must respect the window the query measures.** Stockist sales were seeded on the visit date, so the "7 days after" window was always empty and every row rendered as a −100% collapse. Visits now sit 12–17 days back with sales on both sides.
+4. **Logger readings must respect each shipment's own band.** A hardcoded 2–8 °C range made the frozen lane (−20…−15 °C) look like a permanent 20-degree excursion and poisoned the mean-variance KPI.
+5. **Seeded magnitudes have to be plausible against existing numbers.** GVER first came out at ₹0.4 Cr against ₹103 Cr of inventory. It is ₹10 Cr now.
+6. **Clamp a slider's *state*, not just its rendered value.** Switching SKU left `units` at 2000 against 900 on hand, so the shortfall went negative.
+7. Hours stop being readable past a few days — thermal runway showed `8858 h`.
+
+### Verified
+`tsc --noEmit`, `npm run lint`, `npm run build` clean on both services. All 21 new endpoints exercised over real HTTP against the live D1 with a temporary session (since removed — `users` is back to the two bootstrap admins, and **the owner's own live session was left untouched**). Chromium screenshots of all eight routes with real data, zero console errors. Arrhenius and simulator arithmetic checked by hand against known chemistry.
+
+### Not done
+`/api/supply-chain/sto` writes a `pending` row and stops — there is no SAP integration to acknowledge it. That is deliberate: a fabricated document number would be worse than an honest pending state. `call_recordings.audio_url` is NULL, so the waveform renders as an interactive timeline with markers and says plainly that no audio is attached.
