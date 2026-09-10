@@ -2,6 +2,7 @@
 
 // Import the Link component for client-side navigation between pages
 import Link from "next/link";
+import Image from "next/image";
 // Import the usePathname hook to get the current URL path
 // Import the usePathname hook to get the current URL path
 import { usePathname, useRouter } from "next/navigation";
@@ -10,7 +11,6 @@ import {
   Settings,
   LogOut,
   ChevronRight,
-  Hexagon,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCurrentUser, initialsOf, formatRole } from "@/lib/userStore";
@@ -61,21 +61,18 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
       >
 
         {/* ---------------- LOGO HEADER ---------------- */}
-        <div className="flex items-center gap-3 px-6 py-8">
-          <div className="relative group">
-            <div className="relative w-10 h-10 rounded-xl bg-accent-tint border border-accent-line flex items-center justify-center transition-colors duration-300 group-hover:bg-accent group-hover:border-accent">
-              <Hexagon className="w-5 h-5 text-accent transition-colors duration-300 group-hover:text-white" />
-            </div>
-          </div>
-
-          <div className="flex flex-col">
-            <span className="text-fg font-bold text-lg tracking-tight">
-              Analyzehive
-            </span>
-            <span className="text-[11px] tracking-wide text-subtle">
-              Operations platform
-            </span>
-          </div>
+        <div className="flex flex-col gap-2 px-6 py-8">
+          <Image
+            src="/analyzehive-nexus-logo.png"
+            alt="AnalyzeHive Nexus"
+            width={1620}
+            height={232}
+            priority
+            className="h-8 w-auto"
+          />
+          <span className="text-[11px] tracking-wide text-subtle">
+            Operations platform
+          </span>
         </div>
 
         {/* ---------------- NAVIGATION ---------------- */}

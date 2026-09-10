@@ -29,7 +29,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthPage =
     pathname === "/register" ||
     pathname === "/login" ||
-    pathname === "/auth/callback";
+    pathname === "/auth/callback" ||
+    pathname === "/auth/verify-email";
 
   // Refresh the cached user against the server once per shell mount, so the
   // Sidebar and Profile reflect the real record rather than whatever was
