@@ -21,9 +21,15 @@ export interface AppUser extends ApiUser {
 export type User = ApiUser;
 
 export interface LoginResponse {
-    access_token: string;
-    token_type: string;
+    token: string;
     user: ApiUser;
+}
+
+export interface RequestVerificationResponse {
+    detail: string;
+    // Only present outside production, since no real email provider is wired
+    // up yet - see backend/src/routes/auth.ts's password/request handler.
+    devVerificationUrl?: string;
 }
 
 export interface ApiError {
@@ -113,12 +119,33 @@ class ApiClient {
     }
 
     async login(email: string, password: string): Promise<LoginResponse> {
-        const response = await this.request<LoginResponse>("/api/auth/login", {
+        const response = await this.request<LoginResponse>("/api/auth/password/login", {
             method: "POST",
             body: JSON.stringify({ email, password }),
         });
 
-        this.setToken(response.access_token);
+        this.setToken(response.token);
+        this.setUser(response.user);
+
+        return response;
+    }
+
+    /** Step 1 of the email+password path: request a verification link for an invited email. */
+    async requestPasswordVerification(email: string): Promise<RequestVerificationResponse> {
+        return this.request<RequestVerificationResponse>("/api/auth/password/request", {
+            method: "POST",
+            body: JSON.stringify({ email }),
+        });
+    }
+
+    /** Step 2: the token from that link, plus a new password, activates the account. */
+    async completePasswordSetup(token: string, password: string): Promise<LoginResponse> {
+        const response = await this.request<LoginResponse>("/api/auth/password/complete", {
+            method: "POST",
+            body: JSON.stringify({ token, password }),
+        });
+
+        this.setToken(response.token);
         this.setUser(response.user);
 
         return response;

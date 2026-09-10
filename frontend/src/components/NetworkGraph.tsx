@@ -7,6 +7,7 @@ import {
   Zap,
   Database,
   AlertTriangle,
+  Truck,
 } from "lucide-react";
 import { palette } from "@/lib/theme";
 
@@ -16,7 +17,7 @@ export interface Node {
   x: number;
   y: number;
   label: string;
-  type: 'internal' | 'competitor' | 'market' | 'threat';
+  type: 'internal' | 'competitor' | 'market' | 'threat' | 'supplier';
   status: 'safe' | 'warning' | 'critical' | 'neutral';
   value: number; // Size
   details?: string;
@@ -61,6 +62,7 @@ export default function NetworkGraph({
       case 'competitor': return <Globe className="w-4 h-4" />;
       case 'market': return <Database className="w-4 h-4" />;
       case 'threat': return <AlertTriangle className="w-4 h-4" />;
+      case 'supplier': return <Truck className="w-4 h-4" />;
       default: return <Zap className="w-4 h-4" />;
     }
   };
@@ -109,12 +111,41 @@ export default function NetworkGraph({
   };
 
   // Zoom Logic
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomSpeed = 0.001;
-    const newScale = Math.min(Math.max(0.5, scale - e.deltaY * zoomSpeed), 3);
-    setScale(newScale);
-  };
+  //
+  // Changing `scale` alone zooms around the SVG's (0,0) corner - at 2x+ that
+  // pushes the content (centered around width/2, height/2) mostly or
+  // entirely off-screen instead of magnifying what's visible. Keeping the
+  // viewport's center point fixed on screen as scale changes is what makes
+  // zooming feel like zooming rather than the graph vanishing.
+  const applyZoom = useCallback(
+    (nextScale: number) => {
+      const clamped = Math.min(Math.max(0.5, nextScale), 3);
+      const delta = clamped - scale;
+      setOffset((prev) => ({
+        x: prev.x - (width / 2) * delta,
+        y: prev.y - (height / 2) * delta,
+      }));
+      setScale(clamped);
+    },
+    [scale, width, height]
+  );
+
+  // Attached manually with { passive: false }: React's JSX `onWheel` prop
+  // registers a passive listener, so `preventDefault()` inside it is a
+  // silent no-op (Chrome logs "Unable to preventDefault inside passive
+  // event listener invocation") - the page scrolls underneath the graph
+  // instead of the graph zooming.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomSpeed = 0.001;
+      applyZoom(scale - e.deltaY * zoomSpeed);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [applyZoom, scale]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -141,8 +172,8 @@ export default function NetworkGraph({
         
         {/* Controls Overlay */}
         <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-20">
-            <button onClick={() => setScale(s => Math.min(s + 0.2, 3))} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">+</button>
-            <button onClick={() => setScale(s => Math.max(s - 0.2, 0.5))} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">-</button>
+            <button onClick={() => applyZoom(scale + 0.2)} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">+</button>
+            <button onClick={() => applyZoom(scale - 0.2)} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong">-</button>
             <button onClick={() => {setScale(1); setOffset({x:0, y:0})}} className="p-2 bg-sunken text-fg rounded hover:bg-line-strong text-xs">Reset</button>
         </div>
 
@@ -154,7 +185,6 @@ export default function NetworkGraph({
             onMouseMove={handlePanMove}
             onMouseUp={handlePanEnd}
             onMouseLeave={handlePanEnd}
-            onWheel={handleWheel}
         >
             <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">

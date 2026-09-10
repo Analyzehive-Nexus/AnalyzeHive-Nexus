@@ -49,6 +49,79 @@ marketRadarRouter.get("/signals", async (req, res) => {
   }
 });
 
+interface NodeRow {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+}
+
+// Every network_nodes row generate-synthetic-data.py writes already uses
+// this vocabulary. Only the four original migration-0002 seed rows predate
+// it and need mapping.
+const KNOWN_STATUSES = new Set(["safe", "warning", "critical", "neutral"]);
+const STATUS_ALIASES: Record<string, string> = {
+  active: "safe",
+  stable: "neutral",
+  softening: "warning",
+  flagged: "critical",
+};
+function normaliseStatus(raw: string): string {
+  return KNOWN_STATUSES.has(raw) ? raw : (STATUS_ALIASES[raw] ?? "neutral");
+}
+
+/**
+ * The competitive-landscape map. `kind` is a classification against us
+ * ('internal' meaning our own reporting units, not a single "us" node -
+ * nothing in this table guarantees there is only one), not a relationship,
+ * and there is no edges table - so this returns nodes only, no fabricated
+ * links between them. The client groups by `kind` for layout instead.
+ *
+ * Capped per kind, not overall: ~250 rows per kind means ordering the whole
+ * table by status severity and taking a flat LIMIT let one kind's critical
+ * rows alone fill the entire page, leaving the other three kinds empty and
+ * the layout's four sectors three-quarters blank. ROW_NUMBER() partitioned
+ * by kind guarantees all four show up, each internally most-urgent-first.
+ */
+marketRadarRouter.get("/nodes", async (req, res) => {
+  // Small default on purpose: this feeds a hand-laid-out SVG graph, not a
+  // force-directed one that resolves its own overlaps - past ~20 labelled
+  // nodes in the fixed canvas it becomes unreadable, not just busy.
+  const limit = pageLimit(req, 20, 100);
+  const perKind = Math.max(Math.floor(limit / 4), 1);
+  try {
+    const rows = await query<NodeRow>(
+      `WITH ranked AS (
+         SELECT id, name, kind, status,
+                ROW_NUMBER() OVER (
+                  PARTITION BY kind
+                  ORDER BY CASE status
+                             WHEN 'critical' THEN 0 WHEN 'flagged'   THEN 0
+                             WHEN 'warning'  THEN 1 WHEN 'softening' THEN 1
+                             ELSE 2
+                           END, id
+                ) AS rn
+           FROM network_nodes
+       )
+       SELECT id, name, kind, status FROM ranked
+        WHERE rn <= ${perKind}
+        ORDER BY kind, rn`
+    );
+
+    res.json({
+      nodes: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        kind: r.kind,
+        status: normaliseStatus(r.status),
+      })),
+    });
+  } catch (cause) {
+    console.error("[market-radar] nodes failed:", cause);
+    res.status(503).json({ detail: "Could not load the network" });
+  }
+});
+
 interface AnalysisRow {
   id: number;
   summary: string;

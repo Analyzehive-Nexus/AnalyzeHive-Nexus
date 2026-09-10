@@ -13,11 +13,18 @@ import {
   SESSION_TTL_MS,
   sqlTimestamp,
 } from "../auth/tokens.js";
+import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "../auth/passwords.js";
 import { requireAuth, revokeSession } from "../middleware/auth.js";
 
 export const authRouter = Router();
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const VERIFICATION_TTL_MS = 30 * 60 * 1000;
+
+/** Cheap sanity check - real deliverability isn't ours to verify, matching admin.ts. */
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
 
 function frontendUrl(): string {
   return process.env.FRONTEND_URL ?? "http://localhost:3000";
@@ -181,6 +188,182 @@ authRouter.post("/logout", requireAuth, async (req, res) => {
   }
 });
 
-// Password endpoints are deliberately gone. Sign-in is Google-only, so there
-// are no local credentials to change or reset - Google owns that flow. The
-// frontend's "Change Password" and "Forgot Key?" UI was removed to match.
+// ------------------------------------------------------------ email + password --
+
+/**
+ * A second way in, alongside Google - not a replacement for it. Still
+ * invite-only: an admin has to create the `users` row first (POST
+ * /api/admin/users), exactly as Google sign-in requires. This just gives an
+ * already-invited person another way to prove who they are.
+ *
+ * Step 1. Mint a single-use verification token for an invited/active email
+ * and hand back a link containing it. No email provider is wired up yet -
+ * that is a deliberate stub, not a bug: the link is always logged
+ * server-side, and echoed in the JSON response outside production so local
+ * dev works without a real mailer. In production the response is generic
+ * either way, so this also does not confirm which emails are onboarded.
+ */
+authRouter.post("/password/request", async (req, res) => {
+  const { email } = req.body ?? {};
+  if (typeof email !== "string" || !looksLikeEmail(email.trim())) {
+    return res.status(400).json({ detail: "A valid email is required" });
+  }
+  const normalisedEmail = email.trim();
+  const generic = { detail: "If that email is eligible, a verification link has been sent." };
+
+  try {
+    const user = await first<{ id: string; status: string }>(
+      `SELECT id, status FROM users WHERE email = ?`,
+      [normalisedEmail]
+    );
+    if (!user || user.status === "suspended") {
+      return res.json(generic);
+    }
+
+    const token = generateSessionToken();
+    const tokenHash = await hashToken(token);
+
+    await batch([
+      {
+        sql: `INSERT INTO email_verifications (id, user_id, expires_at) VALUES (?, ?, ?)`,
+        params: [tokenHash, user.id, sqlTimestamp(new Date(Date.now() + VERIFICATION_TTL_MS))],
+      },
+      // Opportunistic sweep, same convention as oauth_states above.
+      { sql: `DELETE FROM email_verifications WHERE expires_at < ?`, params: [sqlTimestamp()] },
+    ]);
+
+    const link = new URL("/auth/verify-email", frontendUrl());
+    link.searchParams.set("token", token);
+    console.log(`[auth] verification link for ${normalisedEmail}: ${link.toString()}`);
+
+    const payload: { detail: string; devVerificationUrl?: string } = { ...generic };
+    if (process.env.NODE_ENV !== "production") {
+      payload.devVerificationUrl = link.toString();
+    }
+    res.json(payload);
+  } catch (cause) {
+    console.error("[auth] password verification request failed:", cause);
+    res.status(503).json({ detail: "Could not process that request" });
+  }
+});
+
+/**
+ * Step 2. The link from step 1 lands here with the raw token. Setting a
+ * password consumes it, proves the invitee controls that mailbox, and
+ * activates the account - the same "first successful sign-in activates the
+ * invite" convention the Google callback uses above.
+ */
+authRouter.post("/password/complete", async (req, res) => {
+  const { token, password } = req.body ?? {};
+  if (typeof token !== "string" || !token) {
+    return res.status(400).json({ detail: "A verification token is required" });
+  }
+  if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+    return res
+      .status(400)
+      .json({ detail: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+  }
+
+  try {
+    const tokenHash = await hashToken(token);
+    const row = await first<{ user_id: string; expires_at: string; consumed_at: string | null }>(
+      `SELECT user_id, expires_at, consumed_at FROM email_verifications WHERE id = ?`,
+      [tokenHash]
+    );
+    if (!row || row.consumed_at || row.expires_at <= sqlTimestamp()) {
+      return res.status(400).json({ detail: "That verification link is invalid or has expired" });
+    }
+
+    const user = await first<{ status: string }>(`SELECT status FROM users WHERE id = ?`, [
+      row.user_id,
+    ]);
+    if (!user || user.status === "suspended") {
+      return res.status(400).json({ detail: "That account is not eligible" });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const sessionToken = generateSessionToken();
+    const sessionTokenHash = await hashToken(sessionToken);
+    const now = sqlTimestamp();
+
+    await batch([
+      { sql: `UPDATE email_verifications SET consumed_at = ? WHERE id = ?`, params: [now, tokenHash] },
+      {
+        sql: `UPDATE users
+                 SET password_hash = ?, email_verified_at = ?, status = 'active', last_login_at = ?
+               WHERE id = ?`,
+        params: [passwordHash, now, now, row.user_id],
+      },
+      {
+        sql: `INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`,
+        params: [sessionTokenHash, row.user_id, sqlTimestamp(new Date(Date.now() + SESSION_TTL_MS))],
+      },
+      {
+        sql: `INSERT INTO activity_log (user_id, action, kind) VALUES (?, ?, 'info')`,
+        params: [row.user_id, "Verified email and set a password"],
+      },
+    ]);
+
+    const freshUser = await first(`SELECT id, email, name, role FROM users WHERE id = ?`, [
+      row.user_id,
+    ]);
+    res.json({ token: sessionToken, user: freshUser });
+  } catch (cause) {
+    console.error("[auth] password setup failed:", cause);
+    res.status(503).json({ detail: "Could not complete verification" });
+  }
+});
+
+/** Ordinary email + password sign-in, for an account that has already completed step 2 above. */
+authRouter.post("/password/login", async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
+    return res.status(400).json({ detail: "Email and password are required" });
+  }
+
+  // One message for "no such account", "no password set yet" and "wrong
+  // password" - narrowing that down is exactly what an attacker wants.
+  const invalid = () => res.status(401).json({ detail: "Invalid email or password" });
+
+  try {
+    const user = await first<{
+      id: string;
+      status: string;
+      password_hash: string | null;
+      email_verified_at: string | null;
+    }>(
+      `SELECT id, status, password_hash, email_verified_at FROM users WHERE email = ?`,
+      [email.trim()]
+    );
+
+    if (!user || !user.password_hash || !user.email_verified_at) return invalid();
+    if (user.status !== "active") return invalid();
+
+    const valid = await verifyPassword(password, user.password_hash);
+    if (!valid) return invalid();
+
+    const sessionToken = generateSessionToken();
+    const sessionTokenHash = await hashToken(sessionToken);
+    const now = sqlTimestamp();
+
+    await batch([
+      { sql: `UPDATE users SET last_login_at = ? WHERE id = ?`, params: [now, user.id] },
+      {
+        sql: `INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`,
+        params: [sessionTokenHash, user.id, sqlTimestamp(new Date(Date.now() + SESSION_TTL_MS))],
+      },
+      {
+        sql: `INSERT INTO activity_log (user_id, action, kind) VALUES (?, ?, 'info')`,
+        params: [user.id, "Signed in with email and password"],
+      },
+    ]);
+
+    const freshUser = await first(`SELECT id, email, name, role FROM users WHERE id = ?`, [
+      user.id,
+    ]);
+    res.json({ token: sessionToken, user: freshUser });
+  } catch (cause) {
+    console.error("[auth] password login failed:", cause);
+    res.status(503).json({ detail: "Could not sign in" });
+  }
+});

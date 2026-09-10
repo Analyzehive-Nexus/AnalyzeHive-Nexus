@@ -166,7 +166,9 @@ export default function DrugDiscoveryPage() {
                 className="rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-xs text-fg focus:border-accent focus:outline-none"
               >
                 {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
+                  <option key={m.id} value={m.id}>
+                    {m.name} · {m.disease} ({m.id})
+                  </option>
                 ))}
               </select>
             </div>
