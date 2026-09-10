@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { batchQuery } from "../db/d1.js";
+import { batchQuery, run } from "../db/d1.js";
 import { toIso } from "../db/rows.js";
 import { regionScope } from "../db/scope.js";
+import { isConfigured as sapConfigured, pingSapSandbox } from "../services/sapSandbox.js";
 
 export const commandCenterRouter = Router();
 
@@ -46,6 +47,12 @@ commandCenterRouter.get("/kpis", async (req, res) => {
   const scope = regionScope(req.user, "region_id");
 
   try {
+    // Real network round trip to the SAP Business Accelerator Hub sandbox,
+    // timed for real - not a seeded random latency figure. Runs alongside
+    // the D1 reads rather than before them, so it costs nothing extra when
+    // SAP_SANDBOX_API_KEY isn't set (the seeded rows below stand as-is).
+    const sapPing = sapConfigured() ? pingSapSandbox() : null;
+
     const [series, excursion, syncs] = await batchQuery<
       [SnapshotRow[], ExcursionRow[], SyncRow[]]
     >([
@@ -97,6 +104,43 @@ commandCenterRouter.get("/kpis", async (req, res) => {
     const pct = (now: number, then: number) =>
       then === 0 ? null : Number((((now - then) / then) * 100).toFixed(1));
 
+    const erpSync = syncs.map((s) => ({
+      system: s.system,
+      lastSyncAt: toIso(s.last_sync_at),
+      latencyMs: s.latency_ms,
+      status: s.status,
+      isLive: false,
+    }));
+
+    if (sapPing) {
+      const ping = await sapPing;
+      const nowIso = new Date().toISOString();
+      // Persist so the next load's "newest row per system" SELECT sees it
+      // too, not just this response. Awaited (not fire-and-forget) because a
+      // serverless invocation can be torn down the instant the response is
+      // sent, before a background write lands.
+      try {
+        await run(
+          `INSERT INTO erp_sync_status (system, last_sync_at, latency_ms, records_synced, status)
+                VALUES ('SAP S/4HANA (live sandbox)', ?, ?, ?, ?)`,
+          [nowIso, ping.latencyMs, ping.recordsSynced, ping.status]
+        );
+      } catch (cause) {
+        console.error("[command-center] sap ping persist failed:", cause);
+      }
+
+      const live = {
+        system: "SAP S/4HANA (live sandbox)",
+        lastSyncAt: nowIso,
+        latencyMs: ping.latencyMs,
+        status: ping.status,
+        isLive: true,
+      };
+      const idx = erpSync.findIndex((s) => s.system === live.system);
+      if (idx >= 0) erpSync[idx] = live;
+      else erpSync.unshift(live);
+    }
+
     res.json({
       range: rangeKey,
       region: regionParam ?? "all",
@@ -116,12 +160,7 @@ commandCenterRouter.get("/kpis", async (req, res) => {
           : 0,
         excursionReadings: excursion[0]?.excursions ?? 0,
       },
-      erpSync: syncs.map((s) => ({
-        system: s.system,
-        lastSyncAt: toIso(s.last_sync_at),
-        latencyMs: s.latency_ms,
-        status: s.status,
-      })),
+      erpSync,
       series: series.map((s) => ({
         date: s.as_of,
         valueAtRiskMinor: s.gross_value_at_risk_minor,

@@ -29,7 +29,7 @@ interface Kpis {
   };
   capitalSaved: { valueMinor: number; changePct: number | null };
   coldChain: { meanExcursionVarianceC: number; excursionReadings: number };
-  erpSync: { system: string; lastSyncAt: string | null; latencyMs: number; status: string }[];
+  erpSync: { system: string; lastSyncAt: string | null; latencyMs: number; status: string; isLive: boolean }[];
   series: { date: string; valueAtRiskMinor: number; capitalSavedMinor: number }[];
 }
 
@@ -160,12 +160,19 @@ export default function CommandCentrePage() {
             <div key={s.system} className="rounded-lg border border-line bg-elevated p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-xs font-medium text-fg">{s.system}</p>
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    s.status === "healthy" ? "bg-ok" : s.status === "lagging" ? "bg-warn" : "bg-danger"
-                  }`}
-                  aria-hidden="true"
-                />
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {s.isLive && (
+                    <span className="rounded-full border border-ok-line bg-ok-tint px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ok">
+                      Live
+                    </span>
+                  )}
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      s.status === "healthy" ? "bg-ok" : s.status === "lagging" ? "bg-warn" : "bg-danger"
+                    }`}
+                    aria-hidden="true"
+                  />
+                </span>
               </div>
               <p className="mt-1 text-xs text-subtle">
                 {formatRelative(s.lastSyncAt)} · {s.latencyMs} ms
