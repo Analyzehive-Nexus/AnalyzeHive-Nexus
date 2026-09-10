@@ -397,3 +397,6 @@ User supplied the actual brand mark (a horizontal wordmark, 1620×232) and asked
 **The original file was moved, not copied** - the user asked for it relocated to a proper location, so the stray `Nexus Logo.png` at the repo root (a space in the filename, no extension convention) was deleted once `analyzehive-nexus-logo.png` existed in its place under `frontend/public/`.
 
 **Verified** with real screenshots, not just a successful build: the sidebar renders the wordmark at proper size above "Operations platform", the login page shows it above the heading, and `/icon.png` returns `200` when fetched directly. `tsc`, lint, and `next build` clean (the new `/icon.png`/`/apple-icon.png` routes appear in the build's route list).
+
+## Branch Cleanup (2026-09-11)
+`pharma-domain` was deleted, both locally and on `origin` (GitHub) — `main` is now the only branch. No merge was actually needed: `main` and `pharma-domain` already pointed to the identical commit (`5b0de22`) on both local and remote before deletion, so nothing was lost. Going forward, work happens directly on `main` (or short-lived feature branches merged back into it) rather than a standing `pharma-domain` branch.
