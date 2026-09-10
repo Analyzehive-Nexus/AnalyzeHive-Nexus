@@ -51,3 +51,29 @@ run that is retried will duplicate those two. Clear them first if you re-run:
 ```sql
 DELETE FROM stockist_sales WHERE stockist_id NOT IN ('STK-501','STK-502','STK-503','STK-504');
 ```
+
+Against the local D1 emulator (`npm run db:local`, see the brain.md "Local D1
+Emulator" log) there's no REST API or size limit to route around - apply the
+generated files straight to the sqlite file instead of using this script:
+
+```bash
+for f in ./out/*.sql; do sqlite3 ../database/local.db < "$f"; done
+```
+
+## `fetch-real-clinical-trials.py`
+
+The one table where genuine real-world data is both available and worth
+having verbatim instead of synthesizing: public trial registries. Pulls a
+handful of real records per molecule from ClinicalTrials.gov's public v2 API
+and inserts them as `is_own = 0` (real competitor trials, never our own
+fictional pipeline), keyed on the real NCT id.
+
+```bash
+python3 scripts/fetch-real-clinical-trials.py ../database/local.db
+```
+
+Idempotent (`INSERT OR IGNORE` on the real NCT id) and safe to re-run to pick
+up newer trials. Everything else in this schema - HCPs, field reps,
+shipments, call transcripts - stays synthetic on purpose: there is no real
+dataset for a fictional company's internal operations, and inventing
+real-looking people or companies would be fabrication, not data.

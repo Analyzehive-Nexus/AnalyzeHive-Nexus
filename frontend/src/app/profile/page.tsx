@@ -186,7 +186,7 @@ export default function ProfilePage() {
               Actions marked <span className="font-medium">signature required</span> cannot be
               completed without applying the credential above.
             </p>
-            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <ul className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
               {(gov?.permissions ?? []).map((p) => (
                 <li key={p.id} className="rounded-lg border border-line bg-elevated p-3">
                   <div className="flex items-start justify-between gap-2">

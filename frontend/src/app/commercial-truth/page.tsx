@@ -200,9 +200,9 @@ export default function CommercialTruthPage() {
               </p>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="max-h-[28rem] overflow-y-auto overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-elevated text-xs text-subtle">
+                <thead className="sticky top-0 z-10 bg-elevated text-xs text-subtle">
                   <tr>
                     <th className="px-5 py-3 text-left font-medium">Rep / HCP</th>
                     <th className="px-5 py-3 text-right font-medium">Geo-fence</th>
@@ -373,7 +373,7 @@ export default function CommercialTruthPage() {
           <div className="rounded-xl border border-line bg-surface p-5 shadow-card">
             <h2 className="mb-1 text-sm font-semibold text-fg">Representative effectiveness</h2>
             <p className="mb-4 text-xs text-subtle">Current period</p>
-            <ul className="space-y-2">
+            <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
               {reps.map((r) => (
                 <li key={r.repId} className="rounded-lg border border-line bg-elevated p-3">
                   <div className="flex items-center justify-between gap-2">

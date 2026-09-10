@@ -45,7 +45,7 @@ function CriticalAlerts() {
         </span>
       </div>
 
-      <div className="space-y-3">
+      <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
         {alerts.map((alert) => {
           const isExpanded = expandedId === alert.id;
           return (

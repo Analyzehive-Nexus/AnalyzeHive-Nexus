@@ -155,9 +155,9 @@ export default function MarketRadarPage() {
             When generic competition can enter each market. Countdown recalculates daily.
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-h-[28rem] overflow-y-auto overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-elevated text-xs text-subtle">
+            <thead className="sticky top-0 z-10 bg-elevated text-xs text-subtle">
               <tr>
                 <th className="px-5 py-3 text-left font-medium">Molecule</th>
                 <th className="px-5 py-3 text-left font-medium">Holder</th>
@@ -211,7 +211,7 @@ export default function MarketRadarPage() {
           <p className="mb-4 text-xs text-subtle">
             NPPA/DPCO ceiling revisions and CDSCO/FDA/EMA actions
           </p>
-          <ul className="space-y-3">
+          <ul className="max-h-96 space-y-3 overflow-y-auto pr-1">
             {events.map((e) => (
               <li key={e.id} className="rounded-lg border border-line bg-elevated p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -261,7 +261,7 @@ export default function MarketRadarPage() {
           <p className="mb-4 text-xs text-subtle">
             Tier movement in hospital networks. Tier 1 is the most favourable.
           </p>
-          <ul className="space-y-3">
+          <ul className="max-h-96 space-y-3 overflow-y-auto pr-1">
             {placements.map((p) => (
               <li
                 key={p.id}
@@ -300,7 +300,7 @@ export default function MarketRadarPage() {
             <TrendingUp className="h-4 w-4 text-subtle" aria-hidden="true" /> Share of voice
           </h2>
           <p className="mb-4 text-xs text-subtle">By therapeutic area, current period</p>
-          <div className="space-y-5">
+          <div className="max-h-[28rem] space-y-5 overflow-y-auto pr-1">
             {sov.map((area) => (
               <div key={area.therapeuticArea}>
                 <div className="mb-2 flex items-center justify-between">
@@ -309,7 +309,7 @@ export default function MarketRadarPage() {
                     ours {area.ownSovPct === null ? "—" : `${area.ownSovPct}%`}
                   </span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
                   {area.companies.map((c) => (
                     <div key={c.company} className="flex items-center gap-2">
                       <span
@@ -345,7 +345,7 @@ export default function MarketRadarPage() {
           <p className="mb-4 text-xs text-subtle">
             Progression against each sponsor&apos;s original plan
           </p>
-          <ul className="space-y-2">
+          <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
             {trials.map((t) => (
               <li
                 key={t.id}

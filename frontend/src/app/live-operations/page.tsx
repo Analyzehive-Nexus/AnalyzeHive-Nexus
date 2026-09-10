@@ -132,9 +132,9 @@ export default function LiveOperationsPage() {
               </p>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="max-h-[28rem] overflow-y-auto overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-elevated text-xs text-subtle">
+                <thead className="sticky top-0 z-10 bg-elevated text-xs text-subtle">
                   <tr>
                     <th className="px-5 py-3 text-left font-medium">Shipment</th>
                     <th className="px-5 py-3 text-left font-medium">Lane</th>
@@ -247,7 +247,7 @@ export default function LiveOperationsPage() {
           </h2>
           <p className="mb-4 text-xs text-subtle">Unresolved, most severe first</p>
 
-          <ul className="space-y-3">
+          <ul className="max-h-96 space-y-3 overflow-y-auto pr-1">
             {(summary?.anomalies ?? []).map((a) => (
               <li
                 key={a.id}

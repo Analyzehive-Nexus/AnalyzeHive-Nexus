@@ -253,7 +253,7 @@ export default function DrugDiscoveryPage() {
           <div className="rounded-xl border border-line bg-surface p-5 shadow-card">
             <h3 className="mb-1 text-sm font-semibold text-fg">Programmes</h3>
             <p className="mb-4 text-xs text-subtle">Ordered by development phase</p>
-            <ul className="space-y-2">
+            <ul className="max-h-96 space-y-2 overflow-y-auto pr-1">
               {programs.map((p) => (
                 <li key={p.id} className="rounded-lg border border-line bg-elevated p-3">
                   <div className="flex items-start justify-between gap-2">
@@ -291,9 +291,9 @@ export default function DrugDiscoveryPage() {
             Binding affinity is in nM — lower is a stronger binder.
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-h-[28rem] overflow-y-auto overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-elevated text-xs text-subtle">
+            <thead className="sticky top-0 z-10 bg-elevated text-xs text-subtle">
               <tr>
                 <th className="px-5 py-3 text-left font-medium">Compound</th>
                 <th className="px-5 py-3 text-left font-medium">Programme</th>

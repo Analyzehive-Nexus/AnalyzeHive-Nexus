@@ -9,3 +9,6 @@
 .env
 .env.local
 .env.*.local
+
+# Local D1 emulator's sqlite file (backend/scripts/local-d1-server.ts).
+/database

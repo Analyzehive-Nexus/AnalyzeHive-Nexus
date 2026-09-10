@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "db:local": "tsx scripts/local-d1-server.ts"
   },
   "engines": {
     "node": ">=20"
@@ -17,9 +18,11 @@
     "express": "^4.21.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20",
+    "better-sqlite3": "^12.11.1",
     "tsx": "^4.19.2",
     "typescript": "^5"
   }

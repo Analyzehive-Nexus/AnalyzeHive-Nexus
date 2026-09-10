@@ -79,7 +79,7 @@ const ServiceGrid = memo(() => {
   }, [loadServices]);
 
   return (
-    <div className="bg-surface backdrop-blur-md border border-line rounded-2xl p-6 h-full flex flex-col hover:border-accent-line transition-colors">
+    <div className="bg-surface backdrop-blur-md border border-line rounded-2xl p-6 h-full min-h-0 flex flex-col hover:border-accent-line transition-colors">
        <div className="flex justify-between items-center mb-6">
          <div>
             <h3 className="text-base font-semibold text-fg flex items-center gap-2">
@@ -96,26 +96,28 @@ const ServiceGrid = memo(() => {
          </button>
        </div>
 
-       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {services.map((svc, i) => (
-            <div key={svc.id} className="p-4 rounded-xl border border-line bg-elevated hover:bg-elevated hover:border-accent-line transition-all group animate-fade-in-up" style={{ animationDelay: `${i * 100}ms` }}>
-               <div className="flex justify-between items-start mb-3">
-                  <StatusBadge status={svc.status} />
-                  <span className="text-[10px] text-subtle font-mono">{svc.region}</span>
-               </div>
-               <h4 className="text-sm font-semibold text-fg mb-2 group-hover:text-accent transition-colors">{svc.name}</h4>
-               <div className="flex items-center gap-4 text-xs">
-                  <div className="flex flex-col">
-                     <span className="text-subtle text-[10px]">Uptime</span>
-                     <span className="font-mono text-fg">{formatUptime(svc.uptimePct)}</span>
-                  </div>
-                  <div className="flex flex-col">
-                     <span className="text-subtle text-[10px]">Latency</span>
-                     <span className={`font-mono font-medium ${(svc.latencyMs ?? 0) > 300 ? 'text-warn' : 'text-fg'}`}>{formatLatency(svc.latencyMs)}</span>
-                  </div>
-               </div>
-            </div>
-          ))}
+       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {services.map((svc, i) => (
+              <div key={svc.id} className="p-4 rounded-xl border border-line bg-elevated hover:bg-elevated hover:border-accent-line transition-all group animate-fade-in-up" style={{ animationDelay: `${i * 100}ms` }}>
+                 <div className="flex justify-between items-start mb-3">
+                    <StatusBadge status={svc.status} />
+                    <span className="text-[10px] text-subtle font-mono">{svc.region}</span>
+                 </div>
+                 <h4 className="text-sm font-semibold text-fg mb-2 group-hover:text-accent transition-colors">{svc.name}</h4>
+                 <div className="flex items-center gap-4 text-xs">
+                    <div className="flex flex-col">
+                       <span className="text-subtle text-[10px]">Uptime</span>
+                       <span className="font-mono text-fg">{formatUptime(svc.uptimePct)}</span>
+                    </div>
+                    <div className="flex flex-col">
+                       <span className="text-subtle text-[10px]">Latency</span>
+                       <span className={`font-mono font-medium ${(svc.latencyMs ?? 0) > 300 ? 'text-warn' : 'text-fg'}`}>{formatLatency(svc.latencyMs)}</span>
+                    </div>
+                 </div>
+              </div>
+            ))}
+         </div>
        </div>
     </div>
   );
@@ -133,7 +135,7 @@ const IncidentLog = memo(() => {
   }, []);
 
   return (
-  <div className="bg-surface backdrop-blur-md border border-line rounded-2xl p-6 h-full flex flex-col hover:border-accent-line transition-colors">
+  <div className="bg-surface backdrop-blur-md border border-line rounded-2xl p-6 h-full min-h-0 flex flex-col hover:border-accent-line transition-colors">
       <div className="flex justify-between items-center mb-6">
        <div>
           <h3 className="text-base font-semibold text-fg flex items-center gap-2">
@@ -143,29 +145,31 @@ const IncidentLog = memo(() => {
        </div>
      </div>
 
-     <div className="flex-1 space-y-4">
-        {incidents.map((inc, i) => (
-           <div key={inc.id} className="relative pl-6 animate-fade-in-up" style={{ animationDelay: `${i * 150}ms` }}>
-              {/* Timeline Line */}
-              <div className="absolute left-[5px] top-2 bottom-0 w-px bg-sunken group-last:hidden" />
-              {/* Dot */}
-              <div className={`absolute left-0 top-2 w-2.5 h-2.5 rounded-full border-2 border-line ${inc.severity === 'Medium' ? 'bg-warn' : inc.severity === 'High' ? 'bg-danger' : 'bg-faint'}`} />
-              
-              <div className="pb-4">
-                 <div className="flex justify-between items-start">
-                    <h4 className="text-sm font-medium text-fg">{inc.title}</h4>
-                    <span className="text-[10px] text-subtle whitespace-nowrap">{formatRelative(inc.startedAt)}</span>
-                 </div>
-                 <div className="flex items-center gap-2 mt-1">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded bg-elevated border border-line ${inc.status === 'Resolved' ? 'text-ok' : 'text-warn'}`}>
-                      {inc.status}
-                    </span>
-                 </div>
-              </div>
-           </div>
-        ))}
-        
-        <div className="pt-4 mt-auto border-t border-line">
+     <div className="flex flex-1 min-h-0 flex-col">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          {incidents.map((inc, i) => (
+             <div key={inc.id} className="relative pl-6 animate-fade-in-up" style={{ animationDelay: `${i * 150}ms` }}>
+                {/* Timeline Line */}
+                <div className="absolute left-[5px] top-2 bottom-0 w-px bg-sunken group-last:hidden" />
+                {/* Dot */}
+                <div className={`absolute left-0 top-2 w-2.5 h-2.5 rounded-full border-2 border-line ${inc.severity === 'Medium' ? 'bg-warn' : inc.severity === 'High' ? 'bg-danger' : 'bg-faint'}`} />
+
+                <div className="pb-4">
+                   <div className="flex justify-between items-start">
+                      <h4 className="text-sm font-medium text-fg">{inc.title}</h4>
+                      <span className="text-[10px] text-subtle whitespace-nowrap">{formatRelative(inc.startedAt)}</span>
+                   </div>
+                   <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded bg-elevated border border-line ${inc.status === 'Resolved' ? 'text-ok' : 'text-warn'}`}>
+                        {inc.status}
+                      </span>
+                   </div>
+                </div>
+             </div>
+          ))}
+        </div>
+
+        <div className="pt-4 mt-4 border-t border-line shrink-0">
            <div className="flex items-center gap-2 p-3 rounded bg-elevated border border-line font-mono text-xs text-accent">
               <Terminal className="w-4 h-4" />
               <span className="opacity-80">System stable. All clusters nominal.</span>
@@ -196,12 +200,12 @@ export default function SystemStatusPage() {
         {/* MAIN CONTENT */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto lg:h-[600px]">
            {/* Left: Service Grid (2 cols) */}
-           <div className="lg:col-span-2 h-full card-3d-hover animate-fade-in-up delay-300">
+           <div className="lg:col-span-2 h-full min-h-0 card-3d-hover animate-fade-in-up delay-300">
               <ServiceGrid />
            </div>
-           
+
            {/* Right: Incident Log (1 col) */}
-           <div className="lg:col-span-1 h-full card-3d-hover animate-fade-in-up delay-500">
+           <div className="lg:col-span-1 h-full min-h-0 card-3d-hover animate-fade-in-up delay-500">
               <IncidentLog />
            </div>
         </section>
