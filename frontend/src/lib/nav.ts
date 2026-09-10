@@ -7,6 +7,7 @@ import {
   Radio,
   UploadCloud,
   User,
+  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +29,8 @@ export interface NavItem {
   title?: string;
   /** One line under the heading explaining what the page is for. */
   subtitle: string;
+  /** Hidden from the Sidebar for anyone whose role isn't "admin". The route itself is still server-enforced. */
+  adminOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -84,6 +87,13 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/profile",
     icon: User,
     subtitle: "Designation, access rights, signature credential and Part 11 sign-off history",
+  },
+  {
+    name: "Admin",
+    href: "/admin",
+    icon: UserCog,
+    subtitle: "Invite accounts, change roles, and suspend or remove access",
+    adminOnly: true,
   },
 ];
 

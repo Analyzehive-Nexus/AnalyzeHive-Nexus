@@ -10,6 +10,10 @@ export interface SessionUser {
   status: string;
   avatarUrl: string | null;
   regionId: string | null;
+  /** Whether this account can sign in with a password, independent of Google. */
+  hasPassword: boolean;
+  /** Whether a Google account is linked (true after first Google sign-in). */
+  hasGoogle: boolean;
 }
 
 declare global {
@@ -31,6 +35,8 @@ interface SessionRow {
   status: string;
   avatar_url: string | null;
   region_id: string | null;
+  password_hash: string | null;
+  google_sub: string | null;
 }
 
 function bearerFrom(authHeader: string | undefined): string | null {
@@ -59,7 +65,8 @@ export async function resolveSession(
   const tokenHash = await hashToken(token);
 
   const row = await first<SessionRow>(
-    `SELECT s.id, s.user_id, u.email, u.name, u.role, u.status, u.avatar_url, u.region_id
+    `SELECT s.id, s.user_id, u.email, u.name, u.role, u.status, u.avatar_url, u.region_id,
+            u.password_hash, u.google_sub
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.id = ?
@@ -82,6 +89,8 @@ export async function resolveSession(
       status: row.status,
       avatarUrl: row.avatar_url,
       regionId: row.region_id,
+      hasPassword: row.password_hash !== null,
+      hasGoogle: row.google_sub !== null,
     },
     tokenHash,
   };

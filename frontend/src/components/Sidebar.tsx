@@ -81,7 +81,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
             Platform
           </div>
 
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === "admin").map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
 

@@ -15,6 +15,7 @@ import {
 } from "../auth/tokens.js";
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "../auth/passwords.js";
 import { requireAuth, revokeSession } from "../middleware/auth.js";
+import { isConfigured as emailConfigured, sendVerificationEmail } from "../services/email.js";
 
 export const authRouter = Router();
 
@@ -236,6 +237,15 @@ authRouter.post("/password/request", async (req, res) => {
     link.searchParams.set("token", token);
     console.log(`[auth] verification link for ${normalisedEmail}: ${link.toString()}`);
 
+    // Awaited, not fire-and-forget: a serverless invocation can be torn down
+    // the instant the response is sent, same reasoning as the ERP write in
+    // commandCenter.ts. Failure is logged but never surfaced to the caller -
+    // the generic response below must not reveal whether the send worked.
+    if (emailConfigured()) {
+      const sent = await sendVerificationEmail(normalisedEmail, link.toString());
+      if (!sent) console.error(`[auth] email send failed for ${normalisedEmail}, link is above`);
+    }
+
     const payload: { detail: string; devVerificationUrl?: string } = { ...generic };
     if (process.env.NODE_ENV !== "production") {
       payload.devVerificationUrl = link.toString();
@@ -304,10 +314,20 @@ authRouter.post("/password/complete", async (req, res) => {
       },
     ]);
 
-    const freshUser = await first(`SELECT id, email, name, role FROM users WHERE id = ?`, [
-      row.user_id,
-    ]);
-    res.json({ token: sessionToken, user: freshUser });
+    const freshUser = await first<{
+      id: string; email: string; name: string; role: string; google_sub: string | null;
+    }>(`SELECT id, email, name, role, google_sub FROM users WHERE id = ?`, [row.user_id]);
+    res.json({
+      token: sessionToken,
+      user: freshUser && {
+        id: freshUser.id,
+        email: freshUser.email,
+        name: freshUser.name,
+        role: freshUser.role,
+        hasPassword: true,
+        hasGoogle: freshUser.google_sub !== null,
+      },
+    });
   } catch (cause) {
     console.error("[auth] password setup failed:", cause);
     res.status(503).json({ detail: "Could not complete verification" });
@@ -358,12 +378,75 @@ authRouter.post("/password/login", async (req, res) => {
       },
     ]);
 
-    const freshUser = await first(`SELECT id, email, name, role FROM users WHERE id = ?`, [
-      user.id,
-    ]);
-    res.json({ token: sessionToken, user: freshUser });
+    const freshUser = await first<{
+      id: string; email: string; name: string; role: string; google_sub: string | null;
+    }>(`SELECT id, email, name, role, google_sub FROM users WHERE id = ?`, [user.id]);
+    res.json({
+      token: sessionToken,
+      user: freshUser && {
+        id: freshUser.id,
+        email: freshUser.email,
+        name: freshUser.name,
+        role: freshUser.role,
+        hasPassword: true,
+        hasGoogle: freshUser.google_sub !== null,
+      },
+    });
   } catch (cause) {
     console.error("[auth] password login failed:", cause);
     res.status(503).json({ detail: "Could not sign in" });
+  }
+});
+
+/**
+ * Changes (or sets, for the first time) the password on the *currently
+ * authenticated* account - distinct from the request/complete pair above,
+ * which is for someone who cannot sign in yet. A Google-only account has no
+ * `currentPassword` to check, so this doubles as "add a password sign-in
+ * option" for them; an account that already has one must prove it first.
+ */
+authRouter.post("/change-password", requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body ?? {};
+  if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LENGTH) {
+    return res
+      .status(400)
+      .json({ detail: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+  }
+
+  try {
+    const row = await first<{ password_hash: string | null }>(
+      `SELECT password_hash FROM users WHERE id = ?`,
+      [req.user!.id]
+    );
+    if (!row) return res.status(404).json({ detail: "Account not found" });
+
+    if (row.password_hash) {
+      if (typeof currentPassword !== "string" || !currentPassword) {
+        return res.status(400).json({ detail: "Current password is required" });
+      }
+      const valid = await verifyPassword(currentPassword, row.password_hash);
+      if (!valid) return res.status(401).json({ detail: "Current password is incorrect" });
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    const now = sqlTimestamp();
+    await batch([
+      {
+        sql: `UPDATE users
+                 SET password_hash = ?,
+                     email_verified_at = COALESCE(email_verified_at, ?)
+               WHERE id = ?`,
+        params: [passwordHash, now, req.user!.id],
+      },
+      {
+        sql: `INSERT INTO activity_log (user_id, action, kind) VALUES (?, ?, 'info')`,
+        params: [req.user!.id, row.password_hash ? "Changed password" : "Set a password"],
+      },
+    ]);
+
+    res.json({ success: true });
+  } catch (cause) {
+    console.error("[auth] change-password failed:", cause);
+    res.status(503).json({ detail: "Could not update the password" });
   }
 });

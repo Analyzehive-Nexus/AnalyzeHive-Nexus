@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Clock, FileSignature, Key, LogOut, MapPin, ScrollText, ShieldCheck, User,
+  CheckCircle2, Clock, Eye, EyeOff, FileSignature, Key, LogOut, MapPin,
+  ScrollText, ShieldCheck, User, UserCog,
 } from "lucide-react";
+import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import { formatDateTime, formatRelative } from "@/lib/format";
@@ -52,6 +54,15 @@ export default function ProfilePage() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     api.get<Governance>("/api/governance/me")
@@ -64,6 +75,44 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try { await api.logout(); } finally { router.push("/login"); }
+  };
+
+  const closePasswordForm = () => {
+    setShowPasswordForm(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPwError(null);
+    setPwSuccess(false);
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    if (newPassword.length < 8) {
+      setPwError("Password must be at least 8 characters");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("Passwords do not match");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await api.changePassword(newPassword, user?.hasPassword ? currentPassword : undefined);
+      setPwSuccess(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      // Refresh the cached session so hasPassword flips immediately - without
+      // this a Google-only account would still see "add a password" after
+      // successfully adding one, until the next shell mount refetches it.
+      api.getCurrentUser().then((fresh) => api.setUser(fresh)).catch(() => {});
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Could not update the password");
+    } finally {
+      setPwBusy(false);
+    }
   };
 
   return (
@@ -103,7 +152,15 @@ export default function ProfilePage() {
               </div>
               <div className="flex items-start justify-between gap-4">
                 <dt className="text-subtle">Sign-in method</dt>
-                <dd className="text-fg">Google</dd>
+                <dd className="text-fg">
+                  {user?.hasGoogle && user?.hasPassword
+                    ? "Google + password"
+                    : user?.hasGoogle
+                      ? "Google"
+                      : user?.hasPassword
+                        ? "Email + password"
+                        : "—"}
+                </dd>
               </div>
             </dl>
           </div>
@@ -305,20 +362,33 @@ export default function ProfilePage() {
                 <div>
                   <h3 className="text-sm font-semibold text-fg">Security</h3>
                   <p className="mt-1 max-w-prose text-sm text-subtle">
-                    This account signs in with Google. Passwords, two-factor authentication and
-                    account recovery are managed there.
+                    {user?.hasGoogle && !user?.hasPassword &&
+                      "This account signs in with Google. Two-factor authentication and account recovery are managed there — add a password below for a second way in."}
+                    {user?.hasPassword && !user?.hasGoogle &&
+                      "This account signs in with email and password."}
+                    {user?.hasGoogle && user?.hasPassword &&
+                      "This account can sign in with either Google or a password."}
+                    {!user?.hasGoogle && !user?.hasPassword && "—"}
                   </p>
                 </div>
               </div>
-              <div className="flex shrink-0 gap-2">
-                <a
-                  href="https://myaccount.google.com/security"
-                  target="_blank"
-                  rel="noopener noreferrer"
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {user?.hasGoogle && (
+                  <a
+                    href="https://myaccount.google.com/security"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-elevated"
+                  >
+                    Manage in Google
+                  </a>
+                )}
+                <button
+                  onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}
                   className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-elevated"
                 >
-                  Manage in Google
-                </a>
+                  {user?.hasPassword ? "Change password" : "Add a password"}
+                </button>
                 <button
                   onClick={handleLogout}
                   disabled={loggingOut}
@@ -329,7 +399,124 @@ export default function ProfilePage() {
                 </button>
               </div>
             </div>
+
+            {showPasswordForm && (
+              <form
+                onSubmit={handlePasswordSubmit}
+                className="mt-5 max-w-sm space-y-3 border-t border-line pt-5 animate-fade-in-up"
+              >
+                {user?.hasPassword && (
+                  <div>
+                    <label className="mb-1.5 block text-xs text-subtle" htmlFor="pw-current">
+                      Current password
+                    </label>
+                    <input
+                      id="pw-current"
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-fg transition-colors focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1.5 block text-xs text-subtle" htmlFor="pw-new">
+                    New password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="pw-new"
+                      type={showPw ? "text" : "password"}
+                      autoComplete="new-password"
+                      required
+                      minLength={8}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 pr-10 text-sm text-fg transition-colors focus:border-accent focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-subtle transition-colors hover:text-fg"
+                      aria-label={showPw ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showPw ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[11px] text-subtle">At least 8 characters.</p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs text-subtle" htmlFor="pw-confirm">
+                    Confirm new password
+                  </label>
+                  <input
+                    id="pw-confirm"
+                    type={showPw ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-fg transition-colors focus:border-accent focus:outline-none"
+                  />
+                </div>
+                {pwError && (
+                  <p role="alert" aria-live="assertive" className="text-xs text-danger">
+                    {pwError}
+                  </p>
+                )}
+                {pwSuccess && (
+                  <p role="status" aria-live="polite" className="flex items-center gap-1.5 text-xs text-ok">
+                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Password updated.
+                  </p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="submit"
+                    disabled={pwBusy}
+                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    {pwBusy ? "Saving…" : "Save password"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closePasswordForm}
+                    className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-elevated"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
+
+          {/* ---------------------------------------- admin */}
+          {user?.role === "admin" && (
+            <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-md bg-elevated p-2 text-subtle">
+                    <UserCog className="h-4 w-4" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-fg">User administration</h3>
+                    <p className="mt-1 max-w-prose text-sm text-subtle">
+                      Invite accounts, change roles, and suspend or remove access.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/admin"
+                  className="shrink-0 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-elevated"
+                >
+                  Open admin
+                </Link>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </div>

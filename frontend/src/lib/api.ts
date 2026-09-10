@@ -8,6 +8,9 @@ export interface ApiUser {
     email: string;
     name: string;
     role: string;
+    /** Present once the caller's own session carries it (GET /api/auth/me and every sign-in response). */
+    hasPassword?: boolean;
+    hasGoogle?: boolean;
 }
 
 // What you might extend locally
@@ -151,6 +154,14 @@ class ApiClient {
         return response;
     }
 
+    /** Changes the signed-in account's password; omit currentPassword for a Google-only account setting one for the first time. */
+    async changePassword(newPassword: string, currentPassword?: string): Promise<void> {
+        await this.request("/api/auth/change-password", {
+            method: "POST",
+            body: JSON.stringify({ newPassword, currentPassword }),
+        });
+    }
+
     async logout(): Promise<void> {
         // Revoke the session row before dropping the local copy. Best-effort:
         // a network failure must still log the user out of this browser.
@@ -189,6 +200,17 @@ class ApiClient {
             method: "PUT",
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
+    }
+
+    async patch<T>(endpoint: string, body?: unknown): Promise<T> {
+        return this.request<T>(endpoint, {
+            method: "PATCH",
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+    }
+
+    async delete<T>(endpoint: string): Promise<T> {
+        return this.request<T>(endpoint, { method: "DELETE" });
     }
 }
 
