@@ -1,14 +1,40 @@
-# OS
-.DS_Store
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
 
-# Vercel CLI link/state, created by `vercel link` / `vercel dev` in any
-# service directory.
+# Next.js & Build outputs
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel & Deployment
 .vercel
 
-# Never commit real secrets - only the .env.example templates are tracked.
+# Environment & Secrets (Never commit real credentials; .env.example templates are tracked)
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+!.env.example
 
-# Local D1 emulator's sqlite file (backend/scripts/local-d1-server.ts).
-/database
+# Local SQLite databases
+database/
+*.sqlite
+*.db
+
+# Operating System & Editor files
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.idea/
+.vscode/
