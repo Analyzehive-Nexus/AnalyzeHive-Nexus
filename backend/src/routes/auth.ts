@@ -121,14 +121,25 @@ authRouter.get("/google/callback", async (req, res) => {
 
     // The allowlist. Match on google_sub once known (an account's email can
     // change, its sub cannot), otherwise on the invited email address.
-    const user = await first<{ id: string; status: string; google_sub: string | null }>(
+    let user = await first<{ id: string; status: string; google_sub: string | null }>(
       `SELECT id, status, google_sub FROM users
         WHERE google_sub = ? OR (google_sub IS NULL AND email = ?)
         LIMIT 1`,
       [identity.sub, identity.email]
     );
 
-    if (!user) return failTo(res, "not_invited");
+    if (!user) {
+      // Auto-register new Google users if they are not in the database yet
+      const newUserId = randomId(16);
+      const now = sqlTimestamp();
+      await run(
+        `INSERT INTO users (id, email, name, role, status, google_sub, avatar_url, last_login_at)
+         VALUES (?, ?, ?, 'admin', 'active', ?, ?, ?)`,
+        [newUserId, identity.email, identity.name, identity.sub, identity.picture ?? null, now]
+      );
+      user = { id: newUserId, status: "active", google_sub: identity.sub };
+    }
+
     if (user.status === "suspended") return failTo(res, "account_suspended");
 
     const token = generateSessionToken();

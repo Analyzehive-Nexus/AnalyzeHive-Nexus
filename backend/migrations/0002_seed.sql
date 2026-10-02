@@ -19,7 +19,8 @@ INSERT OR IGNORE INTO regions (id, name) VALUES
 -- ---------------------------------------------------------------------------
 INSERT OR IGNORE INTO users (id, email, name, role, status) VALUES
   ('admin-bootstrap',    'daskoustav04@gmail.com',        'Koustav Das', 'admin', 'invited'),
-  ('admin-bootstrap-ws', 'koustav.das@analyzehive.com',   'Koustav Das', 'admin', 'invited');
+  ('admin-bootstrap-ws', 'koustav.das@analyzehive.com',   'Koustav Das', 'admin', 'invited'),
+  ('admin-prakash',      'prakashmetla2020@gmail.com',    'Prakash Metla', 'admin', 'invited');
 
 -- ---------------------------------------------------------------------- ops --
 
