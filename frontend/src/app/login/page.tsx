@@ -40,8 +40,9 @@ function LoginContent() {
     invalid_callback: "Sign-in failed. Please try again.",
   };
   const oauthError = searchParams.get("error");
+  const oauthDetail = searchParams.get("detail");
   const error = oauthError
-    ? OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Please try again."
+    ? `${OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Please try again."}${oauthDetail ? ` (${oauthDetail})` : ""}`
     : null;
   const mounted = useHydrated();
 

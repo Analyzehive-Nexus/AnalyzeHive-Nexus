@@ -86,7 +86,11 @@ authRouter.get("/google", async (req, res) => {
     res.redirect(buildAuthUrl(state));
   } catch (cause) {
     console.error("[auth] failed to start Google sign-in:", cause);
-    failTo(res, "signin_unavailable");
+    const errMessage = cause instanceof Error ? cause.message : String(cause);
+    const url = new URL("/login", frontendUrl());
+    url.searchParams.set("error", "signin_unavailable");
+    url.searchParams.set("detail", errMessage);
+    return res.redirect(url.toString());
   }
 });
 
